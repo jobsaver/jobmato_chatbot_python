@@ -159,6 +159,82 @@ def test_flexible_agent_tools():
     print("\n" + "=" * 60)
     print("✨ Flexible tool usage test completed!")
 
+def test_llm_job_search_parsing():
+    """Test the enhanced LLM-powered job search query parsing"""
+    
+    test_cases = [
+        {
+            "query": "android dev jobs",
+            "expected": "Should extract job_title='Android Developer', skills='Android,Kotlin,Java'"
+        },
+        {
+            "query": "senior python engineer remote in bangalore",
+            "expected": "Should extract job_title, skills='Python', work_mode='remote', location, experience_min=5"
+        },
+        {
+            "query": "data scientist internship",
+            "expected": "Should extract job_title='Data Scientist', job_type='internship', skills='Python,ML'"
+        },
+        {
+            "query": "react developer full time",
+            "expected": "Should extract job_title='React Developer', skills='React,JavaScript'"
+        },
+        {
+            "query": "ios app developer",
+            "expected": "Should extract job_title='iOS Developer', skills='iOS,Swift'"
+        }
+    ]
+    
+    print("🧠 Testing LLM-Powered Job Search Query Parsing")
+    print("=" * 60)
+    
+    session_id = f"test_llm_search_{int(time.time())}"
+    
+    for i, test_case in enumerate(test_cases, 1):
+        print(f"\n{i}. Testing Query: '{test_case['query']}'")
+        print(f"Expected: {test_case['expected']}")
+        
+        try:
+            payload = {
+                "user_input": test_case['query'],
+                "token": JWT_TOKEN,
+                "user_id": "test_user_123",
+                "session_id": session_id
+            }
+            
+            response = requests.post(
+                f"{BASE_URL}/jobmato-assistant-test",
+                json=payload,
+                headers={'Content-Type': 'application/json'},
+                timeout=30
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                print(f"✅ Category: {result.get('category', 'Unknown')}")
+                
+                # Check if it's a job search response
+                if result.get('category') == 'JOB_SEARCH':
+                    print(f"✅ Job search detected and processed")
+                    response_text = result.get('response', '')
+                    if 'Found' in response_text or 'jobs' in response_text.lower():
+                        print(f"✅ Job search results returned")
+                    else:
+                        print(f"⚠️ Response: {response_text[:100]}...")
+                else:
+                    print(f"⚠️ Not classified as job search: {result.get('category')}")
+                
+            else:
+                print(f"❌ HTTP {response.status_code}: {response.text}")
+                
+        except Exception as e:
+            print(f"❌ Error: {str(e)}")
+        
+        time.sleep(1)  # Small delay between requests
+    
+    print("\n" + "=" * 60)
+    print("🎯 LLM Job Search Parsing test completed!")
+
 if __name__ == "__main__":
     print("🚀 JobMato ChatBot Test Suite")
     print(f"🌐 Testing against: {BASE_URL}")
@@ -171,4 +247,9 @@ if __name__ == "__main__":
     print("\n" + "🔄" * 20)
     
     # Run flexible tool usage test
-    test_flexible_agent_tools() 
+    test_flexible_agent_tools()
+    
+    print("\n" + "🔄" * 20)
+    
+    # Run LLM job search parsing test
+    test_llm_job_search_parsing() 
