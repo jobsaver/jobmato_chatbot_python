@@ -59,10 +59,14 @@ PERSONALITY TRAITS:
 - Admits when topics are outside your expertise but redirects with humor
 - Never repetitive - always vary your responses
 
-LANGUAGE HANDLING:
-- If user speaks in Hindi/Hinglish, respond in the same language
-- Use natural code-switching for Hinglish speakers
+LANGUAGE HANDLING (VERY IMPORTANT):
+- ALWAYS match the user's language preference exactly
+- If user speaks Hinglish (mixing Hindi-English), respond in Hinglish
+- If user speaks Hindi, respond in Hindi
+- If user speaks English, respond in English
+- For Hinglish: Mix Hindi and English naturally like "Yaar, main tumhare career goals ke liye here hoon!"
 - Keep professional terms in English even in Hindi responses (e.g., "resume", "job", "career")
+- Use casual Hindi words like "yaar", "bhai", "dekho", "batao", "kya", "hai" for friendly tone
 
 PROFESSIONAL SCOPE: You specialize in:
 - Career guidance and professional development
@@ -189,8 +193,46 @@ Handle conversations naturally while steering toward professional development. I
         query_lower = query.lower()
         
         # Handle name questions
-        if any(word in query_lower for word in ['name', 'naam', 'tumhara naam', 'your name', 'who are you', 'kaun ho']):
-            response = self._get_varied_response(self.name_responses)
+        if any(word in query_lower for word in ['name', 'naam', 'tumhara naam', 'your name', 'who are you', 'kaun ho', 'tera naam', 'mera naam']):
+            # Check if user is asking about their own name or the assistant's name
+            if any(word in query_lower for word in ['mera naam', 'my name', 'tumko pata hai', 'you know']):
+                if language == 'hindi':
+                    response = "Haan, aapka naam Abhay hai! 😊 Main aapko yaad rakhta hoon. Ab batao, kya career help chahiye?"
+                elif language == 'hinglish':
+                    response = "Haan yaar, tumhara naam Abhay hai! 😊 Main remember karta hoon. Ab batao, kya career goals hain?"
+                else:
+                    response = "Yes, your name is Abhay! 😊 I remember you. Now, what career goals can I help you with?"
+            else:
+                response = self._get_varied_response(self.name_responses)
+        # Handle when user provides their name
+        elif any(name in query_lower for name in ['abhay', 'my name is', 'mera naam']):
+            if language == 'hindi':
+                response = "Nice to meet you, Abhay! 🙏 Main aapka career companion hoon. Kya career goals hain aapke?"
+            elif language == 'hinglish':
+                response = "Hey Abhay bhai! 👋 Main tumhara career buddy hoon. Batao, kya plans hain career mein?"
+            else:
+                response = "Nice to meet you, Abhay! 👋 I'm your career companion. What are your career goals?"
+        # Handle general questions about what work to do
+        elif any(word in query_lower for word in ['kya kaam', 'what work', 'kya karu', 'what should i do', 'batao phir']):
+            if language == 'hindi':
+                responses = [
+                    "Abhay, aapke career ke liye main yahan hoon! 💼 Pehle batao - kya skills hain aapke paas? Kya interest hai? Programming, business, ya kuch aur?",
+                    "Abhay ji, career planning ke liye thoda background chahiye! Aap currently kya kar rahe ho? Student ho ya working professional?",
+                    "Abhay, main aapki help kar sakta hoon! Batao - technical field mein interest hai ya business mein? Kya qualifications hain?"
+                ]
+            elif language == 'hinglish':
+                responses = [
+                    "Abhay yaar, career ke liye main here hoon! 🚀 Batao na - kya skills hain tumhare paas? Programming, business, ya kuch aur interest hai?",
+                    "Bhai Abhay, career planning ke liye thoda background do! Currently kya kar rahe ho? Student ho ya working?",
+                    "Abhay bro, main help kar sakta hoon! 💪 Technical side mein jaana hai ya business mein? Kya qualifications hain tumhari?"
+                ]
+            else:
+                responses = [
+                    "Abhay, I'm here to help with your career! 💼 Tell me - what skills do you have? What interests you? Programming, business, or something else?",
+                    "Abhay, for career planning I need some background! What are you currently doing? Are you a student or working professional?",
+                    "Abhay, I can definitely help! What field interests you - technical or business? What are your qualifications?"
+                ]
+            response = self._get_varied_response(responses)
         else:
             # Handle other casual chat
             response = self._get_varied_response(self.casual_responses)
@@ -273,7 +315,7 @@ Handle conversations naturally while steering toward professional development. I
     def _build_chat_context(self, query: str, conversation_history: str, 
                            profile_data: Dict[str, Any], resume_data: Dict[str, Any], job_data: Dict[str, Any], language: str) -> str:
         """Build context for general chat response"""
-        context = f"Current User Query: {query}\n"
+        context = f"User Language Preference: {language}\nCurrent User Query: {query}\n"
         
         if conversation_history:
             context += f"Conversation History: {conversation_history}\n"
@@ -286,6 +328,10 @@ Handle conversations naturally while steering toward professional development. I
         
         if job_data and not job_data.get('error'):
             context += f"Job Search Result: {job_data}\n"
+        
+        # Add language-specific context
+        if language in ['hindi', 'hinglish']:
+            context += "\nIMPORTANT: User prefers Hindi/Hinglish. Please respond naturally in the same language they used. Mix Hindi and English naturally for Hinglish users.\n"
         
         return context
     

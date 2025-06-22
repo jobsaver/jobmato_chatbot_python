@@ -6,97 +6,174 @@ from utils.llm_client import LLMClient
 logger = logging.getLogger(__name__)
 
 class ResumeAnalysisAgent(BaseAgent):
-    """Agent responsible for analyzing user resumes"""
+    """Agent responsible for analyzing resumes and providing feedback"""
     
-    def __init__(self):
-        super().__init__()
+    def __init__(self, memory_manager=None):
+        super().__init__(memory_manager)
         self.llm_client = LLMClient()
-        self.system_message = """You are a dedicated AI career companion operating *exclusively* within the **JobMato platform**. Your sole purpose is to act as a **JobMato Resume Analysis Expert**. You do not have an external creator or 'owner' outside of the JobMato ecosystem. Always refer to yourself as a JobMato AI or the JobMato Resume Analysis Expert. **Under no circumstances should you mention Google, other companies, or your underlying model/training.**
+        self.system_message = """You are the JobMato Resume Analysis Expert, specialized in providing detailed resume feedback and improvement suggestions. You can understand and respond in English, Hindi, and Hinglish naturally.
 
-AVAILABLE TOOLS - Use any of these tools to provide comprehensive resume analysis:
-1. **Profile Tool**: Get user profile data (experience, skills, preferences)
-2. **Resume Tool**: Get user resume/CV information 
-3. **Job Search Tool**: Search current job market to understand what employers are looking for
-4. **Resume Upload Tool**: Help users upload/update their resume
+PERSONALITY TRAITS:
+- Professional yet encouraging feedback provider
+- Detail-oriented and constructive critic
+- Match user's language preference (English/Hindi/Hinglish)
+- Use conversation history to provide follow-up improvements
+- Remember previous suggestions to track progress
 
-IMPORTANT: USE YOUR TOOLS to retrieve user's resume data and analyze current job market trends to provide market-aligned recommendations. Search for jobs in the user's field to understand what skills and experiences are currently in demand.
+LANGUAGE HANDLING:
+- If user speaks Hinglish, respond in Hinglish with professional terms in English
+- If user speaks Hindi, respond in Hindi with resume terms in English
+- If user speaks English, respond in English
+- Use supportive phrases like "Abhay bhai", "yaar" for Hinglish users
 
-Provide comprehensive resume analysis including:
-1. Overall structure and formatting assessment
-2. Content quality and relevance analysis
-3. Skills gap identification (based on current market needs)
-4. Keyword optimization suggestions
-5. Experience presentation improvements
-6. Achievement quantification recommendations
-7. Industry-specific best practices
-8. ATS (Applicant Tracking System) optimization
-9. Market competitiveness assessment
+ANALYSIS AREAS:
+- Resume structure and formatting
+- Content quality and relevance
+- Skills presentation and keywords
+- Experience descriptions and achievements
+- Education and certifications
+- ATS optimization suggestions
+- Industry-specific improvements
+- Quantifiable achievements recommendations
 
-Always provide specific, actionable recommendations with examples. Base your analysis on current industry standards and job market demands."""
+Always provide specific, actionable feedback with examples and consider previous analysis if available in conversation history."""
     
     async def analyze_resume(self, routing_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Analyze the user's resume based on the routing data"""
+        """Analyze resume based on the routing data"""
         try:
             token = routing_data.get('token', '')
             base_url = routing_data.get('baseUrl', self.base_url)
-            logger.info(f"📄 Resume analysis with token: {token[:50] if token else 'None'}...")
-            logger.info(f"🌐 Using base URL: {base_url}")
+            session_id = routing_data.get('sessionId', 'default')
             original_query = routing_data.get('originalQuery', '')
+            extracted_data = routing_data.get('extractedData', {})
             
-            # Get resume data using tools
-            logger.info(f"🔧 Using JobMato tools for resume data")
-            resume_response = await self.get_resume_tool(token, base_url)
+            logger.info(f"📄 Resume analysis request with token: {token[:50] if token else 'None'}...")
             
-            # Extract data from tool response
-            if resume_response.get('success'):
-                resume_data = resume_response.get('data', {})
-            else:
-                resume_data = {'error': resume_response.get('error', 'Failed to fetch resume')}
+            # Get conversation context for follow-up analysis
+            conversation_context = await self.get_conversation_context(session_id)
             
-            if resume_data.get('error'):
-                return self.create_response(
-                    'plain_text',
-                    'I need to analyze your resume, but I don\'t see one uploaded yet. Please upload your resume so I can provide you with a comprehensive analysis including formatting tips, content improvements, and market competitiveness assessment.',
-                    {'error': 'No resume data available', 'needs_upload': True}
-                )
+            # Get user profile and resume data
+            profile_data = await self.get_profile_data(token, base_url)
+            resume_data = await self.get_resume_data(token, base_url)
             
-            # Build context for analysis
-            context = self._build_analysis_context(original_query, resume_data)
+            # Check if resume is available
+            if not resume_data or resume_data.get('error'):
+                return self._handle_no_resume(original_query, extracted_data.get('language', 'english'))
             
-            # Generate analysis using LLM
+            # Build comprehensive context for resume analysis
+            context = self.build_context_prompt(
+                current_query=original_query,
+                session_id=session_id,
+                profile_data=profile_data,
+                resume_data=resume_data,
+                conversation_context=conversation_context,
+                language=extracted_data.get('language', 'english')
+            )
+            
+            # Add specific resume analysis context
+            context += "\n\nPROVIDE DETAILED RESUME ANALYSIS including:"
+            context += "\n- Strengths and areas for improvement"
+            context += "\n- Specific suggestions with examples"
+            context += "\n- ATS optimization tips"
+            context += "\n- Industry-specific recommendations"
+            context += "\n- Action items for immediate improvement"
+            
+            # If this is a follow-up analysis, mention progress
+            if conversation_context and "resume" in conversation_context.lower():
+                context += "\n- Reference previous feedback and track improvements"
+            
+            # Generate detailed resume analysis
             analysis_response = await self.llm_client.generate_response(context, self.system_message)
             
-            # Format and return response
-            return self._format_analysis_response(analysis_response, routing_data)
+            # Store conversation in memory for follow-up
+            if self.memory_manager:
+                await self.memory_manager.store_conversation(session_id, original_query, analysis_response)
+            
+            return self.create_response(
+                'resume_analysis',
+                analysis_response,
+                {
+                    'category': 'RESUME_ANALYSIS',
+                    'sessionId': session_id,
+                    'language': extracted_data.get('language', 'english'),
+                    'analysis_type': self._classify_analysis_type(original_query),
+                    'has_previous_analysis': bool(conversation_context and "resume" in conversation_context.lower()),
+                    'resume_sections_found': self._identify_resume_sections(resume_data)
+                }
+            )
             
         except Exception as e:
             logger.error(f"Error analyzing resume: {str(e)}")
+            language = routing_data.get('extractedData', {}).get('language', 'english')
+            
+            if language == 'hinglish':
+                error_msg = "Sorry yaar, resume analysis mein kuch technical issue ho gaya! 😅 Please try again, main help karunga."
+            elif language == 'hindi':
+                error_msg = "Maaf kijiye, resume analysis mein technical problem aa gayi! 😅 Phir try kijiye, main madad karunga."
+            else:
+                error_msg = "I apologize, but I encountered an error while analyzing your resume. Please try again, and I'll be happy to help!"
+            
             return self.create_response(
                 'plain_text',
-                'I encountered an error while analyzing your resume. Please try again.',
-                {'error': str(e)}
+                error_msg,
+                {'error': str(e), 'category': 'RESUME_ANALYSIS'}
             )
     
-    def _build_analysis_context(self, query: str, resume_data: Dict[str, Any]) -> str:
-        """Build context for resume analysis"""
-        context = f"User Query: {query}\n"
-        context += f"Resume Content: {resume_data}\n"
-        context += "\nPlease provide a comprehensive analysis of this resume based on the user's query."
+    def _handle_no_resume(self, query: str, language: str) -> Dict[str, Any]:
+        """Handle case when no resume is available for analysis"""
+        if language == 'hinglish':
+            message = "Abhay bhai, resume analysis ke liye pehle aapka resume upload karna padega! 📄 Upload karo aur phir main detailed analysis de dunga with improvement tips."
+        elif language == 'hindi':
+            message = "Abhay ji, resume analysis ke liye pehle aapka resume upload karna hoga! 📄 Upload kar dijiye, phir main detailed analysis provide karunga."
+        else:
+            message = "Abhay, to provide you with detailed resume analysis, I'll need you to upload your resume first! 📄 Once uploaded, I'll give you comprehensive feedback and improvement suggestions."
         
-        return context
+        return self.create_response(
+            'plain_text',
+            message,
+            {
+                'needs_upload': True,
+                'category': 'RESUME_ANALYSIS',
+                'language': language
+            }
+        )
     
-    def _format_analysis_response(self, analysis_result: str, routing_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Format the resume analysis response"""
-        from datetime import datetime
+    def _classify_analysis_type(self, query: str) -> str:
+        """Classify the type of resume analysis being requested"""
+        query_lower = query.lower()
         
-        metadata = {
-            'analysisType': 'resume_analysis',
-            'analysisDate': datetime.now().isoformat(),
-            'originalQuery': routing_data.get('originalQuery', ''),
-            'sessionId': routing_data.get('sessionId', 'default')
-        }
+        if any(word in query_lower for word in ['ats', 'applicant tracking', 'keywords']):
+            return 'ats_optimization'
+        elif any(word in query_lower for word in ['format', 'structure', 'layout']):
+            return 'formatting'
+        elif any(word in query_lower for word in ['skills', 'technical', 'abilities']):
+            return 'skills_review'
+        elif any(word in query_lower for word in ['experience', 'work history', 'achievements']):
+            return 'experience_review'
+        elif any(word in query_lower for word in ['improve', 'better', 'enhance']):
+            return 'improvement_suggestions'
+        else:
+            return 'comprehensive_analysis'
+    
+    def _identify_resume_sections(self, resume_data: Dict[str, Any]) -> list:
+        """Identify which sections are present in the resume"""
+        sections = []
+        if resume_data and isinstance(resume_data, dict):
+            # Check for common resume sections
+            if resume_data.get('experience') or resume_data.get('work_experience'):
+                sections.append('experience')
+            if resume_data.get('skills') or resume_data.get('technical_skills'):
+                sections.append('skills')
+            if resume_data.get('education'):
+                sections.append('education')
+            if resume_data.get('projects'):
+                sections.append('projects')
+            if resume_data.get('certifications'):
+                sections.append('certifications')
+            if resume_data.get('summary') or resume_data.get('objective'):
+                sections.append('summary')
         
-        return self.create_response('resume_analysis', analysis_result, metadata)
+        return sections
     
     async def process_request(self, routing_data: Dict[str, Any]) -> Dict[str, Any]:
         """Process resume analysis request"""

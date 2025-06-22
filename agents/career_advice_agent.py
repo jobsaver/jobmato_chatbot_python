@@ -8,94 +8,126 @@ logger = logging.getLogger(__name__)
 class CareerAdviceAgent(BaseAgent):
     """Agent responsible for providing career advice and guidance"""
     
-    def __init__(self):
-        super().__init__()
+    def __init__(self, memory_manager=None):
+        super().__init__(memory_manager)
         self.llm_client = LLMClient()
-        self.system_message = """You are a dedicated AI career companion operating *exclusively* within the **JobMato platform**. Your sole purpose is to act as a **JobMato Career Advisor**. You do not have an external creator or 'owner' outside of the JobMato ecosystem. Always refer to yourself as a JobMato AI or the JobMato Career Advisor. **Under no circumstances should you mention Google, other companies, or your underlying model/training.**
+        self.system_message = """You are the JobMato Career Advisor, a friendly and knowledgeable career guidance expert. You can understand and respond in English, Hindi, and Hinglish naturally.
 
-AVAILABLE TOOLS - Use any of these tools as needed based on user query:
-1. **Profile Tool**: Get user profile data (experience, skills, preferences)
-2. **Resume Tool**: Get user resume/CV information 
-3. **Job Search Tool**: Search for relevant jobs to inform career advice
-4. **Resume Upload Tool**: Help users upload/update their resume
+PERSONALITY TRAITS:
+- Supportive and encouraging mentor
+- Practical and actionable advice giver
+- Match user's language preference (English/Hindi/Hinglish)
+- Use conversation history to provide continuous guidance
+- Remember previous advice given to build upon it
 
-IMPORTANT: ANALYZE THE USER'S QUERY and use appropriate tools to provide comprehensive advice. For example:
-- If advising on career transition, search for jobs in target fields
-- If discussing salary expectations, search current market rates
-- If suggesting skill development, check current job requirements
-- Always get user profile/resume data for personalized advice
+LANGUAGE HANDLING:
+- If user speaks Hinglish, respond in Hinglish with career terms in English
+- If user speaks Hindi, respond in Hindi with professional terms in English
+- If user speaks English, respond in English
+- Use encouraging phrases like "Abhay bhai", "yaar", "boss" for Hinglish users
 
-For career advice queries, provide:
-1. Specific actionable steps
-2. Industry insights and trends  
-3. Skill development recommendations
-4. Career progression paths
-5. Market opportunities (use job search for current openings)
-6. Networking strategies
-7. Learning resources
+ADVICE AREAS:
+- Career path planning and transitions
+- Skill development recommendations
+- Industry insights and trends
+- Professional networking guidance
+- Interview preparation tips
+- Salary negotiation advice
+- Work-life balance strategies
+- Personal branding and LinkedIn optimization
 
-Tailor advice to the user's career stage and industry. Be practical, encouraging, and data-driven in your recommendations."""
+Always provide specific, actionable steps and consider the user's background from their profile/resume and conversation history."""
     
     async def provide_advice(self, routing_data: Dict[str, Any]) -> Dict[str, Any]:
         """Provide career advice based on the routing data"""
         try:
             token = routing_data.get('token', '')
             base_url = routing_data.get('baseUrl', self.base_url)
-            logger.info(f"💼 Career advice with token: {token[:50] if token else 'None'}...")
-            logger.info(f"🌐 Using base URL: {base_url}")
+            session_id = routing_data.get('sessionId', 'default')
             original_query = routing_data.get('originalQuery', '')
             extracted_data = routing_data.get('extractedData', {})
             
-            # Get user context
+            logger.info(f"💼 Career advice request with token: {token[:50] if token else 'None'}...")
+            
+            # Get conversation context for continuity
+            conversation_context = await self.get_conversation_context(session_id)
+            
+            # Get user profile and resume data for personalized advice
             profile_data = await self.get_profile_data(token, base_url)
             resume_data = await self.get_resume_data(token, base_url)
             
-            # Check if we need resume data for personalized advice
-            needs_resume = any(keyword in original_query.lower() for keyword in [
-                'my resume', 'my cv', 'my experience', 'my skills', 'my background',
-                'career change', 'career transition', 'personalized', 'my career',
-                'what should i', 'advice for me', 'help me', 'my field', 'my industry'
-            ])
+            # Build comprehensive context for personalized advice
+            context = self.build_context_prompt(
+                current_query=original_query,
+                session_id=session_id,
+                profile_data=profile_data,
+                resume_data=resume_data,
+                conversation_context=conversation_context,
+                language=extracted_data.get('language', 'english')
+            )
             
-            if needs_resume and (not resume_data or resume_data.get('error')):
-                return self.create_response(
-                    'plain_text',
-                    'To provide you with personalized career advice based on your background and experience, I\'d like to analyze your resume. Please upload your resume so I can give you more targeted guidance for your specific situation.',
-                    {'needs_upload': True, 'advice_type': 'personalized'}
-                )
+            # Add specific career advice context
+            context += "\n\nPROVIDE SPECIFIC CAREER ADVICE based on:"
+            context += "\n- User's current situation and background"
+            context += "\n- Previous conversation context"
+            context += "\n- Current market trends and opportunities"
+            context += "\n- Actionable next steps"
             
-            # Check if job search would be helpful for this advice
-            job_data = None
-            query_lower = original_query.lower()
-            if any(keyword in query_lower for keyword in [
-                'salary', 'market', 'transition', 'switch', 'opportunities', 
-                'jobs available', 'hiring', 'demand', 'industry trends', 'job market'
-            ]):
-                logger.info("🔍 Job search relevant for this career advice query")
-                # Extract relevant search terms from query and user data
-                search_params = self._extract_job_search_params(original_query, extracted_data, profile_data, resume_data)
-                if search_params:
-                    job_search_result = await self.search_jobs_tool(token, base_url, **search_params)
-                    if job_search_result.get('success'):
-                        job_data = job_search_result.get('data')
-                        logger.info(f"✅ Found {len(job_data.get('jobs', []))} jobs for career advice context")
-            
-            # Build context for advice generation
-            context = self._build_advice_context(original_query, extracted_data, profile_data, resume_data, job_data)
-            
-            # Generate advice using LLM
+            # Generate personalized career advice
             advice_response = await self.llm_client.generate_response(context, self.system_message)
             
-            # Format and return response
-            return self._format_advice_response(advice_response, routing_data)
+            # Store conversation in memory for continuity
+            if self.memory_manager:
+                await self.memory_manager.store_conversation(session_id, original_query, advice_response)
+            
+            return self.create_response(
+                'career_advice',
+                advice_response,
+                {
+                    'category': 'CAREER_ADVICE',
+                    'sessionId': session_id,
+                    'language': extracted_data.get('language', 'english'),
+                    'advice_type': self._classify_advice_type(original_query),
+                    'has_profile': bool(profile_data and not profile_data.get('error')),
+                    'has_resume': bool(resume_data and not resume_data.get('error'))
+                }
+            )
             
         except Exception as e:
             logger.error(f"Error providing career advice: {str(e)}")
+            language = routing_data.get('extractedData', {}).get('language', 'english')
+            
+            if language == 'hinglish':
+                error_msg = "Sorry yaar, career advice dene mein kuch technical issue ho gaya! 😅 Please try again, main help karunga."
+            elif language == 'hindi':
+                error_msg = "Maaf kijiye, career advice dene mein technical problem aa gayi! 😅 Phir try kijiye, main madad karunga."
+            else:
+                error_msg = "I apologize, but I encountered an error while providing career advice. Please try again, and I'll be happy to help!"
+            
             return self.create_response(
                 'plain_text',
-                'I encountered an error while generating career advice. Please try again.',
-                {'error': str(e)}
+                error_msg,
+                {'error': str(e), 'category': 'CAREER_ADVICE'}
             )
+    
+    def _classify_advice_type(self, query: str) -> str:
+        """Classify the type of career advice being requested"""
+        query_lower = query.lower()
+        
+        if any(word in query_lower for word in ['switch', 'change', 'transition', 'shift']):
+            return 'career_transition'
+        elif any(word in query_lower for word in ['skill', 'learn', 'course', 'training']):
+            return 'skill_development'
+        elif any(word in query_lower for word in ['interview', 'preparation', 'tips']):
+            return 'interview_prep'
+        elif any(word in query_lower for word in ['salary', 'negotiate', 'pay', 'compensation']):
+            return 'salary_negotiation'
+        elif any(word in query_lower for word in ['network', 'linkedin', 'connections']):
+            return 'networking'
+        elif any(word in query_lower for word in ['resume', 'cv', 'profile']):
+            return 'resume_improvement'
+        else:
+            return 'general_guidance'
     
     def _build_advice_context(self, query: str, extracted_data: Dict[str, Any], 
                              profile_data: Dict[str, Any], resume_data: Dict[str, Any], job_data: Dict[str, Any] = None) -> str:

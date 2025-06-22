@@ -30,17 +30,7 @@ socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
 
 class JobMatoChatBot:
     def __init__(self):
-        self.query_classifier = QueryClassifierAgent()
-        self.job_search_agent = JobSearchAgent()
-        self.career_advice_agent = CareerAdviceAgent()
-        self.resume_analysis_agent = ResumeAnalysisAgent()
-        self.project_suggestion_agent = ProjectSuggestionAgent()
-        self.profile_info_agent = ProfileInfoAgent()
-        # Initialize general chat agent with shared memory manager
-        self.general_chat_agent = None  # Will be initialized after memory manager
-        self.response_formatter = ResponseFormatter()
-        
-        # Initialize memory manager with MongoDB
+        # Initialize memory manager first
         mongodb_uri = app.config.get('MONGODB_URI')
         database_name = app.config.get('MONGODB_DATABASE', 'admin')
         collection_name = app.config.get('MONGODB_COLLECTION', 'mato_chats')
@@ -52,8 +42,15 @@ class JobMatoChatBot:
             self.memory_manager = MemoryManager()
             logger.warning("⚠️ Using in-memory storage (no persistence)")
         
-        # Initialize general chat agent with shared memory manager
+        # Initialize all agents with memory manager
+        self.query_classifier = QueryClassifierAgent()
+        self.job_search_agent = JobSearchAgent(self.memory_manager)
+        self.career_advice_agent = CareerAdviceAgent(self.memory_manager)
+        self.resume_analysis_agent = ResumeAnalysisAgent(self.memory_manager)
+        self.project_suggestion_agent = ProjectSuggestionAgent(self.memory_manager)
+        self.profile_info_agent = ProfileInfoAgent(self.memory_manager)
         self.general_chat_agent = GeneralChatAgent(self.memory_manager)
+        self.response_formatter = ResponseFormatter()
     
     def parse_classification(self, raw_response: str, original_data: Dict[str, Any]) -> Dict[str, Any]:
         """Parse and clean the classification response from the LLM"""

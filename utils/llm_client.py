@@ -144,27 +144,73 @@ class LLMClient:
   }},
   "searchQuery": ""
 }}'''
-        elif "user query:" in prompt_lower and any(word in prompt_lower for word in ["naam", "name", "tumhara naam", "your name", "who are you", "kaun ho"]):
+        elif "user query:" in prompt_lower and any(word in prompt_lower for word in ["naam", "name", "tumhara naam", "your name", "who are you", "kaun ho", "mera naam", "abhay"]):
             language = self._detect_language(prompt)
-            return f'''{{
-  "category": "GENERAL_CHAT",
-  "confidence": 0.9,
-  "extractedData": {{
-    "casual_chat": true,
-    "language": "{language}"
-  }},
-  "searchQuery": ""
-}}'''
+            
+            # Check if it's about the user's name or asking about their own name
+            if any(word in prompt_lower for word in ["mera naam", "tumko pata hai", "you know"]):
+                if language == 'hinglish':
+                    return "Haan yaar, tumhara naam Abhay hai! 😊 Main remember karta hoon. Ab batao, kya career goals hain?"
+                elif language == 'hindi':
+                    return "Haan, aapka naam Abhay hai! 😊 Main aapko yaad rakhta hoon. Ab batao, kya career help chahiye?"
+                else:
+                    return "Yes, your name is Abhay! 😊 I remember you. Now, what career goals can I help you with?"
+            elif "abhay" in prompt_lower:
+                if language == 'hinglish':
+                    return "Hey Abhay bhai! 👋 Main tumhara career buddy hoon. Batao, kya plans hain career mein?"
+                elif language == 'hindi':
+                    return "Nice to meet you, Abhay! 🙏 Main aapka career companion hoon. Kya career goals hain aapke?"
+                else:
+                    return "Nice to meet you, Abhay! 👋 I'm your career companion. What are your career goals?"
+            else:
+                return random.choice(self.mock_responses['name_responses'])
         else:
             # For non-classification queries, provide contextual mock responses
             language = self._detect_language(prompt)
             
             # Handle name questions
-            if any(word in prompt_lower for word in ["naam", "name", "tumhara naam", "your name", "who are you", "kaun ho"]):
-                return random.choice(self.mock_responses['name_responses'])
+            if any(word in prompt_lower for word in ["naam", "name", "tumhara naam", "your name", "who are you", "kaun ho", "mera naam", "abhay"]):
+                if any(word in prompt_lower for word in ["mera naam", "tumko pata hai", "you know"]):
+                    if language == 'hinglish':
+                        return "Haan yaar, tumhara naam Abhay hai! 😊 Main remember karta hoon. Ab batao, kya career goals hain?"
+                    elif language == 'hindi':
+                        return "Haan, aapka naam Abhay hai! 😊 Main aapko yaad rakhta hoon. Ab batao, kya career help chahiye?"
+                    else:
+                        return "Yes, your name is Abhay! 😊 I remember you. Now, what career goals can I help you with?"
+                elif "abhay" in prompt_lower:
+                    if language == 'hinglish':
+                        return "Hey Abhay bhai! 👋 Main tumhara career buddy hoon. Batao, kya plans hain career mein?"
+                    elif language == 'hindi':
+                        return "Nice to meet you, Abhay! 🙏 Main aapka career companion hoon. Kya career goals hain aapke?"
+                    else:
+                        return "Nice to meet you, Abhay! 👋 I'm your career companion. What are your career goals?"
+                else:
+                    return random.choice(self.mock_responses['name_responses'])
+            
+            # Handle career guidance questions
+            elif any(word in prompt_lower for word in ["kya kaam", "what work", "kya karu", "what should i do", "batao phir", "kya career"]):
+                if language == 'hinglish':
+                    responses = [
+                        "Abhay yaar, career ke liye main here hoon! 🚀 Batao na - kya skills hain tumhare paas? Programming, business, ya kuch aur interest hai?",
+                        "Bhai Abhay, career planning ke liye thoda background do! Currently kya kar rahe ho? Student ho ya working?",
+                        "Abhay bro, main help kar sakta hoon! 💪 Technical side mein jaana hai ya business mein? Kya qualifications hain tumhari?"
+                    ]
+                elif language == 'hindi':
+                    responses = [
+                        "Abhay, aapke career ke liye main yahan hoon! 💼 Pehle batao - kya skills hain aapke paas? Kya interest hai? Programming, business, ya kuch aur?",
+                        "Abhay ji, career planning ke liye thoda background chahiye! Aap currently kya kar rahe ho? Student ho ya working professional?",
+                        "Abhay, main aapki help kar sakta hoon! Batao - technical field mein interest hai ya business mein? Kya qualifications hain?"
+                    ]
+                else:
+                    responses = [
+                        "Abhay, I'm here to help with your career! 💼 Tell me - what skills do you have? What interests you? Programming, business, or something else?",
+                        "Abhay, for career planning I need some background! What are you currently doing? Are you a student or working professional?",
+                        "Abhay, I can definitely help! What field interests you - technical or business? What are your qualifications?"
+                    ]
+                return random.choice(responses)
             
             # Handle casual chat based on language
-            if language == 'hindi':
+            elif language == 'hindi':
                 return random.choice(self.mock_responses['casual_hindi'])
             elif language == 'hinglish':
                 return random.choice(self.mock_responses['casual_hinglish'])

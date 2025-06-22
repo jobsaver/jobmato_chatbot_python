@@ -8,111 +8,110 @@ logger = logging.getLogger(__name__)
 class JobSearchAgent(BaseAgent):
     """Agent responsible for handling job search requests"""
     
-    def __init__(self):
-        super().__init__()
+    def __init__(self, memory_manager=None):
+        super().__init__(memory_manager)
         self.llm_client = LLMClient()
-        self.query_parsing_prompt = """You are a job search query parser. Parse the user's natural language query and extract structured job search parameters.
+        self.system_message = """You are the JobMato Job Search Assistant, specialized in helping users find relevant job opportunities. You can understand and respond in English, Hindi, and Hinglish naturally.
 
-IMPORTANT: Return ONLY a valid JSON object with the extracted parameters. Do not include any explanation or additional text.
+PERSONALITY TRAITS:
+- Professional yet friendly
+- Enthusiastic about job opportunities
+- Match user's language preference (English/Hindi/Hinglish)
+- Use conversation context to provide better recommendations
 
-Guidelines:
-- Extract meaningful job titles (e.g., "android dev" → "Android Developer", "python programmer" → "Python Developer")  
-- Include relevant technical skills as comma-separated string
-- Only include 'query' field for meaningful search terms, not partial words
-- Avoid creating query terms from partial or meaningless words
+LANGUAGE HANDLING:
+- If user speaks Hinglish, respond in Hinglish
+- If user speaks Hindi, respond in Hindi  
+- If user speaks English, respond in English
+- Use natural code-switching for Hinglish users
 
-Available parameters to extract:
-- job_title: The formal job title (e.g., "android dev" → "Android Developer", "python programmer" → "Python Developer")
-- skills: Relevant technical skills as comma-separated string (e.g., "android dev" → "Android,Kotlin,Java")
-- company: Company name if mentioned
-- locations: Location/city if mentioned
-- work_mode: "remote", "on-site", or "hybrid" if mentioned
-- job_type: "full-time", "part-time", "internship", "contract" if mentioned
-- experience_min: Minimum years if mentioned (number only)
-- experience_max: Maximum years if mentioned (number only)
-- salary_min: Minimum salary if mentioned (number only)
-- salary_max: Maximum salary if mentioned (number only)
-- industry: Industry sector if mentioned
-- query: Only meaningful search terms (avoid partial words like "sugges" from "suggestions")
+RESPONSE FORMAT:
+When presenting job results, format them clearly with:
+- Job title and company
+- Location and work mode
+- Key requirements
+- Brief description
+- Application link or next steps
 
-Examples:
-Input: "android dev jobs"
-Output: {"job_title": "Android Developer", "skills": "Android,Kotlin,Java"}
-
-Input: "senior python engineer remote jobs in bangalore"
-Output: {"job_title": "Senior Python Engineer", "skills": "Python", "locations": "Bangalore", "work_mode": "remote", "experience_min": 5}
-
-Input: "data scientist internship"
-Output: {"job_title": "Data Scientist", "skills": "Python,Machine Learning,Data Science", "job_type": "internship", "experience_max": 1}
-
-Input: "suggest full stack developer jobs"
-Output: {"job_title": "Full Stack Developer", "skills": "JavaScript,React,Node.js"}
-
-Now parse this query:"""
+Always consider the conversation history to provide contextual recommendations."""
     
     async def search_jobs(self, routing_data: Dict[str, Any]) -> Dict[str, Any]:
         """Search for jobs based on the routing data"""
         try:
             token = routing_data.get('token', '')
             base_url = routing_data.get('baseUrl', self.base_url)
-            extracted_data = routing_data.get('extractedData', {})
+            session_id = routing_data.get('sessionId', 'default')
             original_query = routing_data.get('originalQuery', '')
+            extracted_data = routing_data.get('extractedData', {})
             
             logger.info(f"🔍 Job search with token: {token[:50] if token else 'None'}...")
             logger.info(f"🌐 Using base URL: {base_url}")
-            logger.info(f"📋 Original query: {original_query}")
-            logger.info(f"📋 Extracted data: {extracted_data}")
             
-            # Use LLM to intelligently parse the query and extract structured parameters
-            llm_parsed_params = await self._parse_query_with_llm(original_query)
-            logger.info(f"🧠 LLM parsed parameters: {llm_parsed_params}")
+            # Get conversation context
+            conversation_context = await self.get_conversation_context(session_id)
             
-            # Merge LLM parsed params with extracted data (extracted data takes precedence)
-            search_params = {**llm_parsed_params, **extracted_data}
+            # Get user profile and resume data for better job matching
+            profile_data = await self.get_profile_data(token, base_url)
+            resume_data = await self.get_resume_data(token, base_url)
             
-            # Build final search parameters
-            search_params = self._build_search_params(search_params)
+            # Build search parameters from extracted data and user context
+            search_params = self._build_search_params(extracted_data, profile_data, resume_data)
             
-            # Enhance search parameters with intelligent defaults
-            search_params = self._enhance_search_params(search_params, routing_data)
-                
-            # Use the JobMato tools system for comprehensive job search
-            logger.info(f"🔧 Using JobMato Tools for comprehensive job search")
-            logger.info(f"📊 Final enhanced search parameters: {search_params}")
-            job_response = await self.search_jobs_tool(token, base_url, **search_params)
+            # Search for jobs using the JobMato API
+            job_search_result = await self.search_jobs_tool(token, base_url, **search_params)
             
-            # Debug: Log the raw API response
-            logger.info(f"🌐 JobMato API response type: {type(job_response)}")
-            logger.info(f"🌐 JobMato API response success: {job_response.get('success') if isinstance(job_response, dict) else 'N/A'}")
-            logger.info(f"🌐 JobMato API response keys: {list(job_response.keys()) if isinstance(job_response, dict) else 'Not a dict'}")
+            if not job_search_result.get('success'):
+                return self._handle_search_failure(original_query, extracted_data.get('language', 'english'))
             
-            # Extract job data from tool response
-            if job_response.get('success'):
-                job_data = job_response.get('data', {})
-                logger.info(f"📊 Extracted job_data type: {type(job_data)}")
-                logger.info(f"📊 Extracted job_data keys: {list(job_data.keys()) if isinstance(job_data, dict) else 'Not a dict'}")
-                if isinstance(job_data, dict):
-                    # Log potential job arrays
-                    for key in ['jobs', 'data', 'results', 'job_listings']:
-                        if key in job_data:
-                            value = job_data[key]
-                            logger.info(f"📋 Found '{key}' in response: type={type(value)}, length={len(value) if isinstance(value, (list, dict)) else 'N/A'}")
-            else:
-                job_data = {'error': job_response.get('error', 'Unknown error')}
-                logger.error(f"❌ JobMato API returned error: {job_response.get('error')}")
+            jobs_data = job_search_result.get('data', {})
+            jobs = jobs_data.get('jobs', [])
             
-            # Format the response
-            return self._format_job_response(job_data, routing_data)
+            if not jobs:
+                return self._handle_no_jobs_found(original_query, search_params, extracted_data.get('language', 'english'))
+            
+            # Build context for LLM response
+            context = self.build_context_prompt(
+                current_query=original_query,
+                session_id=session_id,
+                profile_data=profile_data,
+                resume_data=resume_data,
+                conversation_context=conversation_context,
+                language=extracted_data.get('language', 'english')
+            )
+            
+            # Add job search results to context
+            context += f"\n\nJob Search Results: {jobs_data}"
+            context += f"\nSearch Parameters Used: {search_params}"
+            
+            # Generate personalized response using LLM
+            response_text = await self.llm_client.generate_response(context, self.system_message)
+            
+            # Store conversation in memory
+            if self.memory_manager:
+                await self.memory_manager.store_conversation(session_id, original_query, response_text)
+            
+            return self.create_response(
+                'job_search_results',
+                response_text,
+                {
+                    'jobs': jobs[:10],  # Limit to top 10 jobs for UI
+                    'total_found': len(jobs),
+                    'search_params': search_params,
+                    'category': 'JOB_SEARCH',
+                    'sessionId': session_id,
+                    'language': extracted_data.get('language', 'english')
+                }
+            )
             
         except Exception as e:
             logger.error(f"Error in job search: {str(e)}")
             return self.create_response(
                 'plain_text',
-                'I encountered an error while searching for jobs. Please try again.',
-                {'error': str(e)}
+                'Sorry yaar, job search mein kuch technical issue ho gaya! 😅 Please try again, main help karunga.',
+                {'error': str(e), 'category': 'JOB_SEARCH'}
             )
     
-    def _build_search_params(self, extracted_data: Dict[str, Any]) -> Dict[str, Any]:
+    def _build_search_params(self, extracted_data: Dict[str, Any], profile_data: Dict[str, Any], resume_data: Dict[str, Any]) -> Dict[str, Any]:
         """Build comprehensive search parameters from extracted data using JobMato Tools"""
         params = {
             'limit': 20,  # Increased default limit

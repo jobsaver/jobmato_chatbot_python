@@ -8,108 +8,165 @@ logger = logging.getLogger(__name__)
 class ProjectSuggestionAgent(BaseAgent):
     """Agent responsible for suggesting projects for skill building"""
     
-    def __init__(self):
-        super().__init__()
+    def __init__(self, memory_manager=None):
+        super().__init__(memory_manager)
         self.llm_client = LLMClient()
-        self.system_message = """You are a dedicated AI career companion operating *exclusively* within the **JobMato platform**. Your sole purpose is to act as a **JobMato Project Suggestion Expert**. You do not have an external creator or 'owner' outside of the JobMato ecosystem. Always refer to yourself as a JobMato AI or the JobMato Project Suggestion Expert. **Under no circumstances should you mention Google, other companies, or your underlying model/training.**
+        self.system_message = """You are the JobMato Project Suggestion Expert, specialized in recommending skill-building projects tailored to career goals. You can understand and respond in English, Hindi, and Hinglish naturally.
 
-Your primary function is to recommend practical, relevant, and portfolio-enhancing projects tailored to the user's background, skill level, and the specific query, always adhering to the JobMato brand and services.
+PERSONALITY TRAITS:
+- Enthusiastic mentor and project guide
+- Practical and hands-on approach
+- Match user's language preference (English/Hindi/Hinglish)  
+- Use conversation history to suggest progressive projects
+- Remember previously suggested projects to avoid repetition
 
-AVAILABLE TOOLS - Use any of these tools to provide comprehensive project suggestions:
-1. **Profile Tool**: Get user profile data (experience, skills, preferences)
-2. **Resume Tool**: Get user resume/CV information 
-3. **Job Search Tool**: Search current job market to understand in-demand skills and project needs
-4. **Resume Upload Tool**: Help users upload/update their resume
+LANGUAGE HANDLING:
+- If user speaks Hinglish, respond in Hinglish with technical terms in English
+- If user speaks Hindi, respond in Hindi with project terms in English
+- If user speaks English, respond in English
+- Use motivating phrases like "Abhay bhai", "yaar", "boss" for Hinglish users
 
-IMPORTANT:
-1. **Prioritize Tool Usage:** BEFORE asking the user for information about their skills or background, USE YOUR AVAILABLE TOOLS (Profile Tool, Resume Tool) to retrieve their profile and resume data.
-2. **Market-Aligned Suggestions:** Use Job Search Tool to understand current market demands and suggest projects that align with in-demand skills and technologies.
-3. **Analyze User Input & Context:** Carefully analyze the 'User Query', 'Skill Level', 'Requested Domain/Focus', and the detailed 'User Profile' and 'User Resume' data. Pay close attention to explicit requests for domains like 'MBA' or 'business masters'.
-4. **Adapt to Industry & Query Type:** Understand that 'projects' can range from software development to business strategy, research, marketing campaigns, financial modeling, operations optimization, and more. Adapt your suggestions based on the implied or explicit industry/domain in the user's query and their profile. **Crucially, if the query is for 'MBA projects' or related business studies, focus exclusively on business-oriented projects, leveraging any technical skills as a secondary asset within a business context (e.g., 'data-driven marketing strategy' instead of 'build a marketing app').**
+PROJECT CATEGORIES:
+- Beginner-friendly projects for skill foundation
+- Intermediate projects for portfolio building
+- Advanced projects for expertise demonstration
+- Industry-specific projects for targeted learning
+- Open-source contribution opportunities
+- Personal branding projects
 
-For each project suggestion, provide the following details:
-1. **Project Title and Description:** A clear, concise title and a detailed description of the project.
-2. **Key Disciplines/Areas:** What business functions, academic disciplines, or technical areas does the project cover? (e.g., Marketing, Finance, Data Analysis, Supply Chain, Software Development, Research)
-3. **Skills Gained/Applied:** List the specific skills the user will develop or utilize by completing this project.
-4. **Tools & Resources:** Mention the relevant software, methodologies, frameworks, or data sources needed. For business projects, this might include Excel, Tableau, specific analytical models, case studies, industry reports, etc.
-5. **Estimated Timeline & Difficulty:** Provide a realistic time estimate and a difficulty level (e.g., Beginner, Intermediate, Advanced).
-6. **Deliverables & Portfolio Value:** What will be the tangible output of the project, and how does it enhance a professional portfolio or resume?
-7. **Step-by-Step Approach:** Outline a high-level plan for how to approach the project.
+Always provide specific project ideas with:
+- Clear objectives and learning outcomes
+- Technology stack recommendations
+- Step-by-step implementation guidance
+- Timeline estimates and milestones
+- Portfolio presentation tips
 
-Focus on projects that are:
-* **Practical & Implementable:** Projects that can genuinely be carried out.
-* **Relevant:** Aligned with current industry trends or academic requirements.
-* **Portfolio-Worthy:** Demonstrates tangible skills and achievements.
-* **Skill-Building Focused:** Designed to help the user learn and apply new concepts."""
+Consider user's current skills, career goals, and conversation history for personalized recommendations."""
     
     async def suggest_projects(self, routing_data: Dict[str, Any]) -> Dict[str, Any]:
         """Suggest projects based on the routing data"""
         try:
             token = routing_data.get('token', '')
             base_url = routing_data.get('baseUrl', self.base_url)
-            logger.info(f"🚀 Project suggestions with token: {token[:50] if token else 'None'}...")
-            logger.info(f"🌐 Using base URL: {base_url}")
+            session_id = routing_data.get('sessionId', 'default')
             original_query = routing_data.get('originalQuery', '')
             extracted_data = routing_data.get('extractedData', {})
             
-            # Get user context
+            logger.info(f"🚀 Project suggestion request with token: {token[:50] if token else 'None'}...")
+            
+            # Get conversation context for progressive project suggestions
+            conversation_context = await self.get_conversation_context(session_id)
+            
+            # Get user profile and resume data for personalized suggestions
             profile_data = await self.get_profile_data(token, base_url)
             resume_data = await self.get_resume_data(token, base_url)
             
-            # Build context for project suggestions
-            context = self._build_suggestion_context(original_query, extracted_data, profile_data, resume_data)
+            # Build comprehensive context for project suggestions
+            context = self.build_context_prompt(
+                current_query=original_query,
+                session_id=session_id,
+                profile_data=profile_data,
+                resume_data=resume_data,
+                conversation_context=conversation_context,
+                language=extracted_data.get('language', 'english')
+            )
             
-            # Generate suggestions using LLM
-            suggestion_response = await self.llm_client.generate_response(context, self.system_message)
+            # Add specific project suggestion context
+            context += "\n\nPROVIDE TAILORED PROJECT SUGGESTIONS including:"
+            context += "\n- Projects matching user's skill level and goals"
+            context += "\n- Clear learning objectives for each project"
+            context += "\n- Technology stack and tools needed"
+            context += "\n- Implementation timeline and milestones"
+            context += "\n- Portfolio presentation tips"
+            context += "\n- Next level project progression"
             
-            # Format and return response
-            return self._format_suggestion_response(suggestion_response, routing_data)
+            # Check for previously suggested projects
+            if conversation_context and any(word in conversation_context.lower() for word in ['project', 'build', 'create']):
+                context += "\n- Reference previous project suggestions and suggest next steps or new challenges"
+            
+            # Generate personalized project suggestions
+            suggestions_response = await self.llm_client.generate_response(context, self.system_message)
+            
+            # Store conversation in memory for progressive suggestions
+            if self.memory_manager:
+                await self.memory_manager.store_conversation(session_id, original_query, suggestions_response)
+            
+            return self.create_response(
+                'project_suggestions',
+                suggestions_response,
+                {
+                    'category': 'PROJECT_SUGGESTION',
+                    'sessionId': session_id,
+                    'language': extracted_data.get('language', 'english'),
+                    'suggestion_type': self._classify_suggestion_type(original_query),
+                    'skill_level': self._determine_skill_level(profile_data, resume_data),
+                    'has_previous_suggestions': bool(conversation_context and 'project' in conversation_context.lower())
+                }
+            )
             
         except Exception as e:
             logger.error(f"Error suggesting projects: {str(e)}")
+            language = routing_data.get('extractedData', {}).get('language', 'english')
+            
+            if language == 'hinglish':
+                error_msg = "Sorry yaar, project suggestions dene mein kuch technical issue ho gaya! 😅 Please try again, main help karunga."
+            elif language == 'hindi':
+                error_msg = "Maaf kijiye, project suggestions dene mein technical problem aa gayi! 😅 Phir try kijiye, main madad karunga."
+            else:
+                error_msg = "I apologize, but I encountered an error while suggesting projects. Please try again, and I'll be happy to help!"
+            
             return self.create_response(
                 'plain_text',
-                'I encountered an error while generating project suggestions. Please try again.',
-                {'error': str(e)}
+                error_msg,
+                {'error': str(e), 'category': 'PROJECT_SUGGESTION'}
             )
     
-    def _build_suggestion_context(self, query: str, extracted_data: Dict[str, Any], 
-                                 profile_data: Dict[str, Any], resume_data: Dict[str, Any]) -> str:
-        """Build context for project suggestions"""
-        context = f"User Query: {query}\n"
-        context += f"Skill Level: {extracted_data.get('skill_level', 'intermediate')}\n"
-        context += f"Requested Domain/Focus: {extracted_data.get('domain', 'general')}\n"
+    def _classify_suggestion_type(self, query: str) -> str:
+        """Classify the type of project suggestions being requested"""
+        query_lower = query.lower()
+        
+        if any(word in query_lower for word in ['beginner', 'basic', 'start', 'first']):
+            return 'beginner_projects'
+        elif any(word in query_lower for word in ['advanced', 'complex', 'challenging']):
+            return 'advanced_projects'
+        elif any(word in query_lower for word in ['portfolio', 'showcase', 'demo']):
+            return 'portfolio_projects'
+        elif any(word in query_lower for word in ['web', 'website', 'frontend', 'backend']):
+            return 'web_development'
+        elif any(word in query_lower for word in ['mobile', 'app', 'android', 'ios']):
+            return 'mobile_development'
+        elif any(word in query_lower for word in ['data', 'machine learning', 'ai', 'analytics']):
+            return 'data_science'
+        elif any(word in query_lower for word in ['open source', 'contribute', 'github']):
+            return 'open_source'
+        else:
+            return 'general_suggestions'
+    
+    def _determine_skill_level(self, profile_data: Dict[str, Any], resume_data: Dict[str, Any]) -> str:
+        """Determine user's skill level based on profile and resume"""
+        # Default to intermediate if no data
+        if not profile_data and not resume_data:
+            return 'intermediate'
+        
+        # Check experience level
+        experience_indicators = []
         
         if profile_data and not profile_data.get('error'):
-            context += f"User Profile Data: {profile_data}\n"
-        else:
-            context += "User Profile Data: Not available\n"
+            # Look for experience indicators in profile
+            if 'experience' in str(profile_data).lower():
+                experience_indicators.append('has_experience')
         
         if resume_data and not resume_data.get('error'):
-            context += f"User Resume Data: {resume_data}\n"
-        else:
-            context += "User Resume Data: Not available\n"
+            # Look for experience indicators in resume
+            resume_str = str(resume_data).lower()
+            if any(word in resume_str for word in ['senior', 'lead', 'manager', 'architect']):
+                return 'advanced'
+            elif any(word in resume_str for word in ['junior', 'intern', 'trainee', 'fresher']):
+                return 'beginner'
+            elif 'experience' in resume_str or 'project' in resume_str:
+                return 'intermediate'
         
-        # Special handling for MBA/business projects
-        if any(keyword in query.lower() for keyword in ['mba', 'business masters', 'business project', 'masters in business']):
-            context += "\nIMPORTANT CONTEXT: If the user's query specifically requests 'MBA projects' or 'business masters projects', prioritize suggestions from business disciplines (e.g., Marketing, Finance, Strategy, Operations, HR) over technical ones, even if the user's profile indicates a strong technical background. The technical background can be leveraged *within* a business project (e.g., using data analytics for market research), but the core project should remain business-focused.\n"
-        
-        return context
-    
-    def _format_suggestion_response(self, suggestion_result: str, routing_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Format the project suggestion response"""
-        from datetime import datetime
-        extracted_data = routing_data.get('extractedData', {})
-        
-        metadata = {
-            'skillLevel': extracted_data.get('skill_level', 'intermediate'),
-            'technology': extracted_data.get('technology', 'general'),
-            'domain': extracted_data.get('domain', 'general'),
-            'suggestionDate': datetime.now().isoformat(),
-            'originalQuery': routing_data.get('originalQuery')
-        }
-        
-        return self.create_response('project_suggestion', suggestion_result, metadata)
+        return 'intermediate'  # Default
     
     async def process_request(self, routing_data: Dict[str, Any]) -> Dict[str, Any]:
         """Process project suggestion request"""

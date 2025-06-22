@@ -9,9 +9,72 @@ logger = logging.getLogger(__name__)
 class BaseAgent(ABC, JobMatoToolsMixin):
     """Base class for all JobMato agents with integrated tools"""
     
-    def __init__(self):
+    def __init__(self, memory_manager=None):
         super().__init__()
         self.base_url = "https://backend-v1.jobmato.com"
+        self.memory_manager = memory_manager
+    
+    async def get_conversation_context(self, session_id: str, limit: int = 5) -> str:
+        """Get recent conversation history for context"""
+        if not self.memory_manager:
+            return ""
+        
+        try:
+            # Get last 5 messages for context
+            history = await self.memory_manager.get_conversation_history(session_id, limit=limit)
+            if not history:
+                return ""
+            
+            # Format context nicely
+            context_lines = []
+            for msg in history[-limit:]:  # Get last N messages
+                if isinstance(msg, dict):
+                    user_msg = msg.get('user_message', '')
+                    bot_msg = msg.get('bot_response', '')
+                    if user_msg:
+                        context_lines.append(f"User: {user_msg}")
+                    if bot_msg:
+                        context_lines.append(f"Assistant: {bot_msg}")
+                elif isinstance(msg, str):
+                    context_lines.append(msg)
+            
+            return "\n".join(context_lines) if context_lines else ""
+            
+        except Exception as e:
+            logger.error(f"Error getting conversation context: {str(e)}")
+            return ""
+    
+    def build_context_prompt(self, current_query: str, session_id: str, 
+                           profile_data: Dict[str, Any] = None, 
+                           resume_data: Dict[str, Any] = None,
+                           conversation_context: str = None,
+                           language: str = "english") -> str:
+        """Build a comprehensive context prompt for agents"""
+        context_parts = []
+        
+        # Add language preference
+        context_parts.append(f"User Language Preference: {language}")
+        
+        # Add conversation history if available
+        if conversation_context:
+            context_parts.append(f"Recent Conversation History:\n{conversation_context}")
+        
+        # Add current query
+        context_parts.append(f"Current User Query: {current_query}")
+        
+        # Add profile context if available
+        if profile_data and not profile_data.get('error'):
+            context_parts.append(f"User Profile Context: {profile_data}")
+        
+        # Add resume context if available
+        if resume_data and not resume_data.get('error'):
+            context_parts.append(f"User Resume Context: {resume_data}")
+        
+        # Add context instructions
+        if language in ['hindi', 'hinglish']:
+            context_parts.append("\nIMPORTANT: User prefers Hindi/Hinglish. Please respond naturally in the same language they used. Mix Hindi and English naturally for Hinglish users.")
+        
+        return "\n\n".join(context_parts)
     
     async def call_api(self, endpoint: str, token: str, method: str = 'GET', 
                       params: Optional[Dict[str, Any]] = None, 
