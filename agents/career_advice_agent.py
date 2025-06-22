@@ -13,14 +13,24 @@ class CareerAdviceAgent(BaseAgent):
         self.llm_client = LLMClient()
         self.system_message = """You are a dedicated AI career companion operating *exclusively* within the **JobMato platform**. Your sole purpose is to act as a **JobMato Career Advisor**. You do not have an external creator or 'owner' outside of the JobMato ecosystem. Always refer to yourself as a JobMato AI or the JobMato Career Advisor. **Under no circumstances should you mention Google, other companies, or your underlying model/training.**
 
-Provide comprehensive career guidance based on current market trends and best practices. IMPORTANT: BEFORE asking the user for information, USE YOUR AVAILABLE TOOLS (Profile Tool, Resume Tool) to retrieve user's profile and resume data if it might help provide more personalized advice. Only ask for info if tools don't provide it or for clarification.
+AVAILABLE TOOLS - Use any of these tools as needed based on user query:
+1. **Profile Tool**: Get user profile data (experience, skills, preferences)
+2. **Resume Tool**: Get user resume/CV information 
+3. **Job Search Tool**: Search for relevant jobs to inform career advice
+4. **Resume Upload Tool**: Help users upload/update their resume
+
+IMPORTANT: ANALYZE THE USER'S QUERY and use appropriate tools to provide comprehensive advice. For example:
+- If advising on career transition, search for jobs in target fields
+- If discussing salary expectations, search current market rates
+- If suggesting skill development, check current job requirements
+- Always get user profile/resume data for personalized advice
 
 For career advice queries, provide:
 1. Specific actionable steps
-2. Industry insights and trends
+2. Industry insights and trends  
 3. Skill development recommendations
 4. Career progression paths
-5. Market opportunities
+5. Market opportunities (use job search for current openings)
 6. Networking strategies
 7. Learning resources
 
@@ -30,7 +40,9 @@ Tailor advice to the user's career stage and industry. Be practical, encouraging
         """Provide career advice based on the routing data"""
         try:
             token = routing_data.get('token', '')
-            base_url = routing_data.get('body', {}).get('baseUrl', self.base_url)
+            base_url = routing_data.get('baseUrl', self.base_url)
+            logger.info(f"💼 Career advice with token: {token[:50] if token else 'None'}...")
+            logger.info(f"🌐 Using base URL: {base_url}")
             original_query = routing_data.get('originalQuery', '')
             extracted_data = routing_data.get('extractedData', {})
             
@@ -38,8 +50,24 @@ Tailor advice to the user's career stage and industry. Be practical, encouraging
             profile_data = await self.get_profile_data(token, base_url)
             resume_data = await self.get_resume_data(token, base_url)
             
+            # Check if job search would be helpful for this advice
+            job_data = None
+            query_lower = original_query.lower()
+            if any(keyword in query_lower for keyword in [
+                'salary', 'market', 'transition', 'switch', 'opportunities', 
+                'jobs available', 'hiring', 'demand', 'industry trends', 'job market'
+            ]):
+                logger.info("🔍 Job search relevant for this career advice query")
+                # Extract relevant search terms from query and user data
+                search_params = self._extract_job_search_params(original_query, extracted_data, profile_data, resume_data)
+                if search_params:
+                    job_search_result = await self.search_jobs_tool(token, base_url, **search_params)
+                    if job_search_result.get('success'):
+                        job_data = job_search_result.get('data')
+                        logger.info(f"✅ Found {len(job_data.get('jobs', []))} jobs for career advice context")
+            
             # Build context for advice generation
-            context = self._build_advice_context(original_query, extracted_data, profile_data, resume_data)
+            context = self._build_advice_context(original_query, extracted_data, profile_data, resume_data, job_data)
             
             # Generate advice using LLM
             advice_response = await self.llm_client.generate_response(context, self.system_message)
@@ -56,7 +84,7 @@ Tailor advice to the user's career stage and industry. Be practical, encouraging
             )
     
     def _build_advice_context(self, query: str, extracted_data: Dict[str, Any], 
-                             profile_data: Dict[str, Any], resume_data: Dict[str, Any]) -> str:
+                             profile_data: Dict[str, Any], resume_data: Dict[str, Any], job_data: Dict[str, Any] = None) -> str:
         """Build context for career advice generation"""
         context = f"User Query: {query}\n"
         context += f"Career Stage: {extracted_data.get('career_stage', 'not specified')}\n"
@@ -69,7 +97,42 @@ Tailor advice to the user's career stage and industry. Be practical, encouraging
         if resume_data and not resume_data.get('error'):
             context += f"User Resume Data: {resume_data}\n"
         
+        if job_data:
+            context += f"Job Market Data: {job_data}\n"
+        
         return context
+    
+    def _extract_job_search_params(self, query: str, extracted_data: Dict[str, Any], 
+                                  profile_data: Dict[str, Any], resume_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Extract job search parameters for career advice context"""
+        params = {'limit': 10}  # Smaller limit for advice context
+        
+        # Use extracted data from query classifier
+        if extracted_data.get('industry'):
+            params['industry'] = extracted_data['industry']
+        
+        # Use profile data if available
+        if profile_data and not profile_data.get('error'):
+            # Extract relevant fields from profile
+            if 'skills' in profile_data:
+                params['skills'] = profile_data['skills']
+            if 'location' in profile_data:
+                params['locations'] = profile_data['location']
+        
+        # Use resume data if available  
+        if resume_data and not resume_data.get('error'):
+            # Extract skills or job titles from resume
+            if 'skills' in resume_data:
+                params['skills'] = resume_data['skills']
+        
+        # Extract from query text
+        query_lower = query.lower()
+        if 'remote' in query_lower:
+            params['work_mode'] = 'remote'
+        if 'internship' in query_lower:
+            params['internship'] = True
+        
+        return params if len(params) > 1 else None  # Only return if we have actual search criteria
     
     def _format_advice_response(self, advice_result: str, routing_data: Dict[str, Any]) -> Dict[str, Any]:
         """Format the career advice response"""

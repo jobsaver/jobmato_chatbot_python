@@ -121,7 +121,8 @@ class JobMatoChatBot:
             'originalQuery': original_data.get('chatInput', ''),
             'body': original_data,
             'token': original_data.get('token', ''),
-            'sessionId': original_data.get('sessionId', 'default')
+            'sessionId': original_data.get('sessionId', 'default'),
+            'baseUrl': original_data.get('baseUrl', 'https://backend-v1.jobmato.com')
         }
         
         return routing_data

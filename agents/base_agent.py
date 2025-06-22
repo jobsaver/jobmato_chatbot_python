@@ -2,13 +2,15 @@ import logging
 import requests
 from typing import Dict, Any, Optional
 from abc import ABC, abstractmethod
+from utils.jobmato_tools import JobMatoToolsMixin
 
 logger = logging.getLogger(__name__)
 
-class BaseAgent(ABC):
-    """Base class for all JobMato agents"""
+class BaseAgent(ABC, JobMatoToolsMixin):
+    """Base class for all JobMato agents with integrated tools"""
     
     def __init__(self):
+        super().__init__()
         self.base_url = "https://backend-v1.jobmato.com"
     
     async def call_api(self, endpoint: str, token: str, method: str = 'GET', 
@@ -17,24 +19,38 @@ class BaseAgent(ABC):
                       base_url: Optional[str] = None) -> Dict[str, Any]:
         """Make API calls to JobMato backend"""
         try:
-            url = f"{base_url or self.base_url}{endpoint}"
-            headers = {'Authorization': f'Bearer {token}'}
+            # Always use the JobMato backend URL for API calls
+            # The base_url parameter is for WebSocket communication, not JobMato API calls
+            api_base_url = self.base_url  # Always use https://backend-v1.jobmato.com
+            url = f"{api_base_url}{endpoint}"
+            
+            headers = {
+                'Authorization': f'Bearer {token}',
+                'Content-Type': 'application/json'
+            }
+            
+            logger.info(f"🌐 Making API call to: {url}")
+            logger.info(f"🔑 Using token: {token[:50]}..." if token else "❌ No token provided")
             
             if method.upper() == 'GET':
-                response = requests.get(url, headers=headers, params=params)
+                response = requests.get(url, headers=headers, params=params, timeout=30)
             elif method.upper() == 'POST':
-                response = requests.post(url, headers=headers, json=data, params=params)
+                response = requests.post(url, headers=headers, json=data, params=params, timeout=30)
             else:
                 raise ValueError(f"Unsupported HTTP method: {method}")
             
+            logger.info(f"📡 API response status: {response.status_code}")
+            
             if response.status_code == 200:
-                return response.json()
+                result = response.json()
+                logger.info(f"✅ API call successful: {endpoint}")
+                return result
             else:
-                logger.error(f"API call failed: {response.status_code} - {response.text}")
-                return {'error': f"API call failed: {response.status_code}"}
+                logger.error(f"❌ API call failed: {response.status_code} - {response.text}")
+                return {'error': f"API call failed: {response.status_code}", 'details': response.text}
                 
         except Exception as e:
-            logger.error(f"Error calling API {endpoint}: {str(e)}")
+            logger.error(f"❌ Error calling API {endpoint}: {str(e)}")
             return {'error': str(e)}
     
     async def get_profile_data(self, token: str, base_url: Optional[str] = None) -> Dict[str, Any]:

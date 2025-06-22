@@ -11,20 +11,34 @@ class JobSearchAgent(BaseAgent):
         """Search for jobs based on the routing data"""
         try:
             token = routing_data.get('token', '')
-            base_url = routing_data.get('body', {}).get('baseUrl', self.base_url)
+            base_url = routing_data.get('baseUrl', self.base_url)
             extracted_data = routing_data.get('extractedData', {})
             
-            # Build search parameters
+            logger.info(f"🔍 Job search with token: {token[:50] if token else 'None'}...")
+            logger.info(f"🌐 Using base URL: {base_url}")
+            logger.info(f"📋 Search parameters: {extracted_data}")
+            
+            # Build search parameters from extracted data
             search_params = self._build_search_params(extracted_data)
             
-            # Call job search API
-            job_data = await self.call_api(
-                '/api/rag/jobs',
-                token,
-                method='GET',
-                params=search_params,
-                base_url=base_url
-            )
+            # Add original query as fallback search term if no specific query provided
+            original_query = routing_data.get('originalQuery', '')
+            if original_query and not search_params.get('query'):
+                search_params['query'] = original_query
+            
+            # Enhance search parameters with intelligent defaults
+            search_params = self._enhance_search_params(search_params, routing_data)
+                
+            # Use the new JobMato tools system for comprehensive job search
+            logger.info(f"🔧 Using JobMato Tools for comprehensive job search")
+            logger.info(f"📊 Final enhanced search parameters: {search_params}")
+            job_response = await self.search_jobs_tool(token, base_url, **search_params)
+            
+            # Extract job data from tool response
+            if job_response.get('success'):
+                job_data = job_response.get('data', {})
+            else:
+                job_data = {'error': job_response.get('error', 'Unknown error')}
             
             # Format the response
             return self._format_job_response(job_data, routing_data)
@@ -38,33 +52,99 @@ class JobSearchAgent(BaseAgent):
             )
     
     def _build_search_params(self, extracted_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Build search parameters from extracted data"""
+        """Build comprehensive search parameters from extracted data using JobMato Tools"""
         params = {
-            'limit': 10,
+            'limit': 20,  # Increased default limit
             'page': 1
         }
         
-        # Map extracted data to API parameters
+        # 🔍 Basic search parameters
+        if extracted_data.get('query'):
+            params['query'] = extracted_data['query']
+        if extracted_data.get('search'):
+            params['search'] = extracted_data['search']
         if extracted_data.get('job_title'):
             params['job_title'] = extracted_data['job_title']
         if extracted_data.get('company'):
             params['company'] = extracted_data['company']
+        
+        # 📍 Location parameters
         if extracted_data.get('location'):
             params['locations'] = extracted_data['location']
+        if extracted_data.get('locations'):
+            params['locations'] = extracted_data['locations']
+        
+        # 🛠️ Skills and domain parameters
         if extracted_data.get('skills'):
             params['skills'] = extracted_data['skills']
         if extracted_data.get('industry'):
             params['industry'] = extracted_data['industry']
         if extracted_data.get('domain'):
             params['domain'] = extracted_data['domain']
+        
+        # 💼 Job type and work mode parameters
         if extracted_data.get('job_type'):
             params['job_type'] = extracted_data['job_type']
         if extracted_data.get('work_mode'):
             params['work_mode'] = extracted_data['work_mode']
-        if extracted_data.get('experience_min'):
+        
+        # 📅 Experience parameters
+        if extracted_data.get('experience_min') is not None:
             params['experience_min'] = extracted_data['experience_min']
-        if extracted_data.get('experience_max'):
+        if extracted_data.get('experience_max') is not None:
             params['experience_max'] = extracted_data['experience_max']
+        
+        # 💰 Salary parameters
+        if extracted_data.get('salary_min') is not None:
+            params['salary_min'] = extracted_data['salary_min']
+        if extracted_data.get('salary_max') is not None:
+            params['salary_max'] = extracted_data['salary_max']
+        
+        # 🎓 Internship filter
+        if extracted_data.get('internship') is not None:
+            params['internship'] = extracted_data['internship']
+        
+        # 📄 Pagination parameters
+        if extracted_data.get('limit'):
+            params['limit'] = extracted_data['limit']
+        if extracted_data.get('page'):
+            params['page'] = extracted_data['page']
+        
+        logger.info(f"🔧 Built comprehensive search params: {params}")
+        return params
+    
+    def _enhance_search_params(self, params: Dict[str, Any], routing_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Enhance search parameters with intelligent defaults and optimizations"""
+        
+        # Auto-detect internship based on query keywords
+        original_query = routing_data.get('originalQuery', '').lower()
+        if any(keyword in original_query for keyword in ['intern', 'internship', 'trainee', 'graduate']):
+            params['internship'] = True
+            params['job_type'] = 'internship'
+            params['experience_max'] = 1  # Max 1 year for internships
+        
+        # Auto-detect remote work preference
+        if any(keyword in original_query for keyword in ['remote', 'work from home', 'wfh']):
+            params['work_mode'] = 'remote'
+        elif any(keyword in original_query for keyword in ['on-site', 'office', 'onsite']):
+            params['work_mode'] = 'on-site'
+        elif any(keyword in original_query for keyword in ['hybrid']):
+            params['work_mode'] = 'hybrid'
+        
+        # Auto-detect experience level
+        if any(keyword in original_query for keyword in ['junior', 'entry level', 'fresher', 'fresh graduate']):
+            params['experience_min'] = 0
+            params['experience_max'] = 2
+        elif any(keyword in original_query for keyword in ['senior', 'lead', 'principal']):
+            params['experience_min'] = 5
+        elif any(keyword in original_query for keyword in ['mid level', 'intermediate']):
+            params['experience_min'] = 2
+            params['experience_max'] = 5
+        
+        # Optimize limit based on search specificity
+        if len([k for k in params.keys() if params[k] and k not in ['limit', 'page']]) > 5:
+            # Very specific search, increase limit
+            params['limit'] = 25
         
         return params
     

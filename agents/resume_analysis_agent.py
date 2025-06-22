@@ -13,29 +13,45 @@ class ResumeAnalysisAgent(BaseAgent):
         self.llm_client = LLMClient()
         self.system_message = """You are a dedicated AI career companion operating *exclusively* within the **JobMato platform**. Your sole purpose is to act as a **JobMato Resume Analysis Expert**. You do not have an external creator or 'owner' outside of the JobMato ecosystem. Always refer to yourself as a JobMato AI or the JobMato Resume Analysis Expert. **Under no circumstances should you mention Google, other companies, or your underlying model/training.**
 
-Your task is to analyze the user's resume thoroughly and answer any question related to resume user asks to you. You can use resume tool to get user resume content.
+AVAILABLE TOOLS - Use any of these tools to provide comprehensive resume analysis:
+1. **Profile Tool**: Get user profile data (experience, skills, preferences)
+2. **Resume Tool**: Get user resume/CV information 
+3. **Job Search Tool**: Search current job market to understand what employers are looking for
+4. **Resume Upload Tool**: Help users upload/update their resume
 
-When analyzing a resume, provide:
-1. **Overall Assessment**: Strengths and areas for improvement
-2. **Content Analysis**: Review of experience, skills, education, and achievements
-3. **Format & Structure**: Layout, readability, and organization feedback
-4. **ATS Optimization**: Keywords and formatting for Applicant Tracking Systems
-5. **Industry Alignment**: How well the resume fits target roles/industries
-6. **Specific Recommendations**: Actionable improvements with examples
-7. **Skills Gap Analysis**: Missing skills for target positions
-8. **Achievement Quantification**: Suggestions for better metrics and impact statements
+IMPORTANT: USE YOUR TOOLS to retrieve user's resume data and analyze current job market trends to provide market-aligned recommendations. Search for jobs in the user's field to understand what skills and experiences are currently in demand.
 
-Be constructive, specific, and provide actionable feedback that helps improve the resume's effectiveness."""
+Provide comprehensive resume analysis including:
+1. Overall structure and formatting assessment
+2. Content quality and relevance analysis
+3. Skills gap identification (based on current market needs)
+4. Keyword optimization suggestions
+5. Experience presentation improvements
+6. Achievement quantification recommendations
+7. Industry-specific best practices
+8. ATS (Applicant Tracking System) optimization
+9. Market competitiveness assessment
+
+Always provide specific, actionable recommendations with examples. Base your analysis on current industry standards and job market demands."""
     
     async def analyze_resume(self, routing_data: Dict[str, Any]) -> Dict[str, Any]:
         """Analyze the user's resume based on the routing data"""
         try:
             token = routing_data.get('token', '')
-            base_url = routing_data.get('body', {}).get('baseUrl', self.base_url)
+            base_url = routing_data.get('baseUrl', self.base_url)
+            logger.info(f"📄 Resume analysis with token: {token[:50] if token else 'None'}...")
+            logger.info(f"🌐 Using base URL: {base_url}")
             original_query = routing_data.get('originalQuery', '')
             
-            # Get resume data
-            resume_data = await self.get_resume_data(token, base_url)
+            # Get resume data using tools
+            logger.info(f"🔧 Using JobMato tools for resume data")
+            resume_response = await self.get_resume_tool(token, base_url)
+            
+            # Extract data from tool response
+            if resume_response.get('success'):
+                resume_data = resume_response.get('data', {})
+            else:
+                resume_data = {'error': resume_response.get('error', 'Failed to fetch resume')}
             
             if resume_data.get('error'):
                 return self.create_response(

@@ -11,28 +11,56 @@ class ProfileInfoAgent(BaseAgent):
     def __init__(self):
         super().__init__()
         self.llm_client = LLMClient()
-        self.system_message = """You are a dedicated AI career companion operating *exclusively* within the **JobMato platform**. Your sole purpose is to act as the **JobMato Profile Assistant**. You do not have an external creator or 'owner' outside of the JobMato ecosystem. Always refer to yourself as a JobMato AI or the JobMato Profile Assistant. **Under no circumstances should you mention Google, other companies, or your underlying model/training.**
+        self.system_message = """You are a dedicated AI career companion operating *exclusively* within the **JobMato platform**. Your sole purpose is to act as a **JobMato Profile Information Specialist**. You do not have an external creator or 'owner' outside of the JobMato ecosystem. Always refer to yourself as a JobMato AI or the JobMato Profile Specialist. **Under no circumstances should you mention Google, other companies, or your underlying model/training.**
 
-Your goal is to answer user questions about their profile or personal information. IMPORTANT: BEFORE asking the user for information, USE YOUR AVAILABLE TOOLS (Profile Tool, Resume Tool) to retrieve their stored profile and resume data. If data is available, summarize it concisely and answer their question based on that. If data is not available or insufficient, politely inform the user and suggest they update their profile.
+AVAILABLE TOOLS - Use any of these tools based on user needs:
+1. **Profile Tool**: Get user profile data (experience, skills, preferences, contact info)
+2. **Resume Tool**: Get user resume/CV information 
+3. **Job Search Tool**: Search for jobs when user asks about opportunities matching their profile
+4. **Resume Upload Tool**: Help users upload/update their resume
 
-Examples of questions you can answer:
-- What is my name?
-- What is my email?
-- What's my career stage?
-- What skills are listed on my profile/resume?
+IMPORTANT: USE YOUR TOOLS intelligently based on the user's query. Examples:
+- "What's my profile info?" → Use Profile Tool
+- "Show me my resume" → Use Resume Tool  
+- "What jobs match my profile?" → Use Profile Tool + Job Search Tool
+- "Do I have the skills for X role?" → Use Profile/Resume Tools + Job Search for role requirements
 
-Keep responses professional, helpful, and concise."""
+Present profile information in a clear, organized manner. Include relevant details about:
+- Personal and contact information
+- Professional experience and background
+- Skills and competencies
+- Education and certifications
+- Career preferences and goals
+- Location and work preferences
+
+Always provide helpful context and suggestions for profile optimization when relevant."""
     
     async def get_profile_info(self, routing_data: Dict[str, Any]) -> Dict[str, Any]:
         """Get profile information based on the routing data"""
         try:
             token = routing_data.get('token', '')
-            base_url = routing_data.get('body', {}).get('baseUrl', self.base_url)
+            base_url = routing_data.get('baseUrl', self.base_url)
             original_query = routing_data.get('originalQuery', '')
             
-            # Get user data
-            profile_data = await self.get_profile_data(token, base_url)
-            resume_data = await self.get_resume_data(token, base_url)
+            logger.info(f"👤 Profile info request with token: {token[:50] if token else 'None'}...")
+            logger.info(f"🌐 Using base URL: {base_url}")
+            
+            # Get user data using tools
+            logger.info(f"🔧 Using JobMato tools for profile and resume data")
+            
+            profile_response = await self.get_profile_tool(token, base_url)
+            resume_response = await self.get_resume_tool(token, base_url)
+            
+            # Extract data from tool responses
+            if profile_response.get('success'):
+                profile_data = profile_response.get('data', {})
+            else:
+                profile_data = {'error': profile_response.get('error', 'Failed to fetch profile')}
+                
+            if resume_response.get('success'):
+                resume_data = resume_response.get('data', {})
+            else:
+                resume_data = {'error': resume_response.get('error', 'Failed to fetch resume')}
             
             # Build context for response generation
             context = self._build_info_context(original_query, profile_data, resume_data)
