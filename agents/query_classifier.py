@@ -13,6 +13,11 @@ class QueryClassifierAgent(BaseAgent):
         self.llm_client = LLMClient()
         self.system_message = """You are the JobMato Assistant Query Classifier. Your ONLY task is to analyze user queries and classify them into specific categories, returning ONLY a JSON object. DO NOT include any conversational text, greetings, or explanations outside the JSON. Ensure the JSON is valid and complete.
 
+IMPORTANT CONTENT FILTERING:
+1. PROFESSIONAL SCOPE: Only respond to career, job, resume, and professional development queries.
+2. INAPPROPRIATE CONTENT: Classify harmful, offensive, or non-professional content as GENERAL_CHAT with content_filter flag.
+3. OUT OF SCOPE: Personal questions, entertainment, general knowledge, or non-career topics should be GENERAL_CHAT.
+
 Classify the query into ONE of these categories:
 1. JOB_SEARCH - User is looking for job, internship, or career opportunities.
 2. RESUME_ANALYSIS - User wants resume review, feedback, or improvement suggestions.
@@ -20,7 +25,7 @@ Classify the query into ONE of these categories:
 4. PROJECT_SUGGESTION - User needs project ideas for skill building.
 5. RESUME_UPLOAD - User explicitly states they want to upload or update their resume.
 6. PROFILE_INFO - User asking about their personal profile, name, or stored information.
-7. GENERAL_CHAT - General conversation, greetings, non-career related queries, or queries that don't fit other categories.
+7. GENERAL_CHAT - General conversation, greetings, non-career related queries, inappropriate content, or queries that don't fit other categories.
 
 Respond with JSON in this exact format, and NOTHING ELSE:
 {
@@ -39,6 +44,10 @@ Respond with JSON in this exact format, and NOTHING ELSE:
     // industry: string (e.g., "Technology", "Finance", "Healthcare")
     // domain: string (e.g., "AI/ML", "Cloud Computing", "E-commerce")
     // If a parameter is not explicitly mentioned, omit it or set to null.
+    
+    // SPECIAL FLAGS for GENERAL_CHAT:
+    // content_filtered: true (if content is inappropriate/harmful)
+    // out_of_scope: true (if query is completely unrelated to careers/jobs)
   },
   "searchQuery": "reformulated query for job search if applicable, e.g., 'Android Developer jobs in Bangalore'"
 }

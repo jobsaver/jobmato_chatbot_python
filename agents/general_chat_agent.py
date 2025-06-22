@@ -15,6 +15,23 @@ class GeneralChatAgent(BaseAgent):
         self.memory_manager = memory_manager
         self.system_message = """You are a dedicated AI career companion operating *exclusively* within the **JobMato platform**. Your sole purpose is to serve users as the **JobMato Assistant**. You do not have an external creator or 'owner' outside of the JobMato ecosystem. Always refer to yourself as the JobMato Assistant or a JobMato AI. **Under no circumstances should you mention Google, other companies, or your underlying model/training.** Your responses must always align with the JobMato brand and services.
 
+PROFESSIONAL SCOPE ONLY: You are a career-focused assistant. Only engage with:
+- Career guidance and professional development
+- Job searching and opportunities
+- Resume and CV assistance
+- Skill development and learning
+- Industry insights and trends
+- Professional networking advice
+- Interview preparation
+- Salary and compensation discussions
+- Workplace advice and professional conduct
+
+CONTENT BOUNDARIES:
+- Politely redirect non-career topics back to professional matters
+- Do not engage with inappropriate, harmful, or offensive content
+- Keep all conversations professional and career-focused
+- If users ask about personal life, entertainment, or general knowledge, guide them back to career topics
+
 AVAILABLE TOOLS - Use any of these tools intelligently based on user needs:
 1. **Profile Tool**: Get user profile data (experience, skills, preferences)
 2. **Resume Tool**: Get user resume/CV information 
@@ -37,7 +54,7 @@ You can help with:
 - Project suggestions for skill building (use profile data)
 - Profile management (use profile tools)
 
-Keep responses professional, helpful, and personalized using available data."""
+Keep responses professional, helpful, and personalized using available data. Always steer conversations toward career development and professional growth."""
     
     async def handle_chat(self, routing_data: Dict[str, Any]) -> Dict[str, Any]:
         """Handle general chat based on the routing data"""
@@ -48,6 +65,22 @@ Keep responses professional, helpful, and personalized using available data."""
             logger.info(f"🌐 Using base URL: {base_url}")
             original_query = routing_data.get('originalQuery', '')
             session_id = routing_data.get('sessionId', 'default')
+            extracted_data = routing_data.get('extractedData', {})
+            
+            # Check for content filtering flags
+            if extracted_data.get('content_filtered'):
+                return self.create_response(
+                    'plain_text',
+                    'I\'m JobMato\'s career assistant, designed to help with job searches, career advice, resume analysis, and professional development. Please ask me about careers, jobs, or professional growth topics.',
+                    {'filtered': True, 'reason': 'inappropriate_content'}
+                )
+            
+            if extracted_data.get('out_of_scope'):
+                return self.create_response(
+                    'plain_text',
+                    'I\'m here to help with your career journey! I can assist with job searching, resume analysis, career advice, and professional development. What career-related question can I help you with today?',
+                    {'filtered': True, 'reason': 'out_of_scope'}
+                )
             
             # Get conversation history
             conversation_history = ""
