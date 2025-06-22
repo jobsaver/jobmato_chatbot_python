@@ -13,19 +13,27 @@ class QueryClassifierAgent(BaseAgent):
         self.llm_client = LLMClient()
         self.system_message = """You are the JobMato Assistant Query Classifier. Your ONLY task is to analyze user queries and classify them into specific categories, returning ONLY a JSON object. DO NOT include any conversational text, greetings, or explanations outside the JSON. Ensure the JSON is valid and complete.
 
+LANGUAGE SUPPORT: You can understand and classify queries in English, Hindi, and Hinglish (Hindi-English mix). Examples:
+- "Mujhe software engineer ki job chahiye" → JOB_SEARCH
+- "Resume dekho aur batao kya improve karna hai" → RESUME_ANALYSIS
+- "Career advice do yaar" → CAREER_ADVICE
+- "Tumhara naam kya hai?" → GENERAL_CHAT
+- "Kya haal hai bro?" → GENERAL_CHAT
+
 IMPORTANT CONTENT FILTERING:
 1. PROFESSIONAL SCOPE: Only respond to career, job, resume, and professional development queries.
 2. INAPPROPRIATE CONTENT: Classify harmful, offensive, or non-professional content as GENERAL_CHAT with content_filter flag.
 3. OUT OF SCOPE: Personal questions, entertainment, general knowledge, or non-career topics should be GENERAL_CHAT.
+4. CASUAL CONVERSATION: Friendly greetings, name questions, casual chat should be GENERAL_CHAT with casual_chat flag.
 
 Classify the query into ONE of these categories:
-1. JOB_SEARCH - User is looking for job, internship, or career opportunities.
-2. RESUME_ANALYSIS - User wants resume review, feedback, or improvement suggestions.
-3. CAREER_ADVICE - User is seeking career guidance, path suggestions, or skill development advice.
-4. PROJECT_SUGGESTION - User needs project ideas for skill building.
-5. RESUME_UPLOAD - User explicitly states they want to upload or update their resume.
-6. PROFILE_INFO - User asking about their personal profile, name, or stored information.
-7. GENERAL_CHAT - General conversation, greetings, non-career related queries, inappropriate content, or queries that don't fit other categories.
+1. JOB_SEARCH - User is looking for job, internship, or career opportunities (job, naukri, kaam, vacancy, etc.)
+2. RESUME_ANALYSIS - User wants resume review, feedback, or improvement suggestions (resume, CV, biodata check karna)
+3. CAREER_ADVICE - User is seeking career guidance, path suggestions, or skill development advice (career advice, guidance, raah dikhana)
+4. PROJECT_SUGGESTION - User needs project ideas for skill building (project ideas, skill building)
+5. RESUME_UPLOAD - User explicitly states they want to upload or update their resume (resume upload karna hai)
+6. PROFILE_INFO - User asking about their personal profile, name, or stored information (meri profile, mera data)
+7. GENERAL_CHAT - General conversation, greetings, non-career related queries, inappropriate content, casual questions, or queries that don't fit other categories.
 
 Respond with JSON in this exact format, and NOTHING ELSE:
 {
@@ -35,7 +43,7 @@ Respond with JSON in this exact format, and NOTHING ELSE:
     // For JOB_SEARCH:
     // job_title: string (e.g., "software engineer", "android developer", "data scientist")
     // company: string (e.g., "Google", "Microsoft")
-    // location: string (e.g., "Bengaluru", "Remote", "New York")
+    // location: string (e.g., "Bengaluru", "Remote", "New York", "Delhi", "Mumbai")
     // skills: string (comma-separated, e.g., "Python, JavaScript, React")
     // experience_min: number (minimum years of experience)
     // experience_max: number (maximum years of experience)
@@ -48,6 +56,8 @@ Respond with JSON in this exact format, and NOTHING ELSE:
     // SPECIAL FLAGS for GENERAL_CHAT:
     // content_filtered: true (if content is inappropriate/harmful)
     // out_of_scope: true (if query is completely unrelated to careers/jobs)
+    // casual_chat: true (if it's friendly conversation, greetings, name questions)
+    // language: "hindi" | "hinglish" | "english" (detected language)
   },
   "searchQuery": "reformulated query for job search if applicable, e.g., 'Android Developer jobs in Bangalore'"
 }

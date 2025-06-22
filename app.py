@@ -539,5 +539,5 @@ def upload_resume_ui():
 if __name__ == '__main__':
     # Use SocketIO's run method instead of Flask's run method
     # Port 5001 to avoid conflicts with macOS AirPlay Receiver on port 5000
-    port = int(os.environ.get('PORT', 5000))
+    port = int(os.environ.get('PORT', 5002))
     socketio.run(app, debug=True, host='0.0.0.0', port=port) 
