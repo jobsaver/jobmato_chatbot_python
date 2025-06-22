@@ -3,6 +3,8 @@ import requests
 from typing import Dict, Any, List, Optional, Union
 import json
 from urllib.parse import urlencode
+import os
+import io
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +42,23 @@ class JobMatoTools:
                 if files:
                     # Remove Content-Type for file uploads (let requests set it)
                     headers.pop('Content-Type', None)
+                    logger.info(f"📁 Files being sent: {list(files.keys()) if files else 'None'}")
+                    logger.info(f"📄 Data being sent: {data if data else 'None'}")
+                    
+                    # Debug the actual file content being sent
+                    for key, file_info in files.items():
+                        if isinstance(file_info, tuple) and len(file_info) >= 2:
+                            filename, file_obj = file_info[0], file_info[1]
+                            if hasattr(file_obj, 'getvalue'):
+                                logger.info(f"📁 File '{key}': {filename}, size: {len(file_obj.getvalue())} bytes")
+                            elif hasattr(file_obj, 'read'):
+                                # Save current position
+                                pos = file_obj.tell() if hasattr(file_obj, 'tell') else 0
+                                file_obj.seek(0)
+                                content = file_obj.read()
+                                file_obj.seek(pos)  # Restore position
+                                logger.info(f"📁 File '{key}': {filename}, size: {len(content)} bytes")
+                    
                     response = requests.post(url, headers=headers, files=files, data=data, timeout=self.timeout)
                 else:
                     response = requests.post(url, headers=headers, json=data, timeout=self.timeout)
@@ -47,6 +66,7 @@ class JobMatoTools:
                 raise ValueError(f"Unsupported HTTP method: {method}")
             
             logger.info(f"📡 Response status: {response.status_code}")
+            logger.info(f"📡 Response headers: {dict(response.headers)}")
             
             if response.status_code in [200, 201]:
                 try:
@@ -181,7 +201,7 @@ class JobMatoTools:
             
             with open(file_path, 'rb') as file:
                 files = {'resume': file}
-                return self._make_request('POST', '/api/rag/resume/upload', token, files=files)
+                return self._make_request('POST', '/api/resumes/upload', token, files=files)
                 
         except FileNotFoundError:
             logger.error(f"❌ File not found: {file_path}")
@@ -201,9 +221,28 @@ class JobMatoTools:
         """
         try:
             logger.info(f"📤 Uploading resume content: {filename}")
+            logger.info(f"📊 File size: {len(file_content)} bytes")
+            logger.info(f"📝 File content type: {type(file_content)}")
+            logger.info(f"📋 First 100 bytes: {file_content[:100] if len(file_content) > 100 else file_content}")
             
-            files = {'resume': (filename, file_content)}
-            return self._make_request('POST', '/api/rag/resume/upload', token, files=files)
+            # Create BytesIO object like Postman would do for form-data
+            import io
+            file_obj = io.BytesIO(file_content)
+            file_obj.seek(0)
+            
+            # Ensure proper content type detection
+            content_type = 'application/pdf'
+            if filename.lower().endswith('.doc'):
+                content_type = 'application/msword'
+            elif filename.lower().endswith('.docx'):
+                content_type = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+            
+            # Format exactly like Postman form-data: (name, file_object, content_type)
+            files = {'resume': (filename, file_obj, content_type)}
+            logger.info(f"📋 Files prepared for upload: {list(files.keys())}")
+            logger.info(f"📄 Content type: {content_type}")
+            
+            return self._make_request('POST', '/api/resumes/upload', token, files=files)
                 
         except Exception as e:
             logger.error(f"❌ Upload error: {str(e)}")

@@ -481,7 +481,7 @@ def upload_resume_ui():
             
             # Use the upload tool
             upload_result = asyncio.run(
-                chatbot.job_search_agent.upload_resume(
+                chatbot.job_search_agent.upload_resume_tool(
                     file_content=file_content,
                     filename=file.filename,
                     token=token
