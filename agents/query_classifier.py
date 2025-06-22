@@ -25,6 +25,7 @@ IMPORTANT CONTENT FILTERING:
 2. INAPPROPRIATE CONTENT: Classify harmful, offensive, or non-professional content as GENERAL_CHAT with content_filter flag.
 3. OUT OF SCOPE: Personal questions, entertainment, general knowledge, or non-career topics should be GENERAL_CHAT.
 4. CASUAL CONVERSATION: Friendly greetings, name questions, casual chat should be GENERAL_CHAT with casual_chat flag.
+5. SLANG/INAPPROPRIATE: Personal/family questions, inappropriate content should be GENERAL_CHAT with slang_redirect flag.
 
 Classify the query into ONE of these categories:
 1. JOB_SEARCH - User is looking for job, internship, or career opportunities (job, naukri, kaam, vacancy, etc.)
@@ -33,7 +34,7 @@ Classify the query into ONE of these categories:
 4. PROJECT_SUGGESTION - User needs project ideas for skill building (project ideas, skill building)
 5. RESUME_UPLOAD - User explicitly states they want to upload or update their resume (resume upload karna hai)
 6. PROFILE_INFO - User asking about their personal profile, name, or stored information (meri profile, mera data)
-7. GENERAL_CHAT - General conversation, greetings, non-career related queries, inappropriate content, casual questions, or queries that don't fit other categories.
+7. GENERAL_CHAT - General conversation, greetings, non-career related queries, inappropriate content, casual questions, slang, or queries that don't fit other categories.
 
 Respond with JSON in this exact format, and NOTHING ELSE:
 {
@@ -57,6 +58,8 @@ Respond with JSON in this exact format, and NOTHING ELSE:
     // content_filtered: true (if content is inappropriate/harmful)
     // out_of_scope: true (if query is completely unrelated to careers/jobs)
     // casual_chat: true (if it's friendly conversation, greetings, name questions)
+    // slang_redirect: true (if it's slang, personal/family questions, inappropriate content)
+    // hobby_redirect: true (if asking about hobbies, interests, personal activities)
     // language: "hindi" | "hinglish" | "english" (detected language)
   },
   "searchQuery": "reformulated query for job search if applicable, e.g., 'Android Developer jobs in Bangalore'"

@@ -40,6 +40,44 @@ class GeneralChatAgent(BaseAgent):
             "Main JobMato ka AI assistant hoon, career expert! 🎯 Aapki professional journey mein guide karna mera passion hai. Kya goals hain?",
         ]
         
+        # Humorous responses for slang/inappropriate questions
+        self.slang_responses = [
+            # English slang responses
+            "Haha, nice try! 😂 But I'm a professional AI, not your buddy from the streets! Let's talk about getting you that dream job instead. What field interests you?",
+            "LOL, you're testing me! 🤣 I'm JobMato's career assistant, not a gossip buddy. How about we channel that energy into building your career? What skills do you want to develop?",
+            "Dude, I'm flattered but I'm all about that professional life! 💼 Let's focus on making you successful. What's your career goal?",
+            "Hehe, you're funny! 😄 But my database is full of job opportunities, not personal drama. Ready to find your next career move?",
+            
+            # Hinglish slang responses
+            "Arre yaar, main family wala nahi hoon! 😂 Main toh career wala AI hoon! Batao, kya job chahiye tumhe? Software, business, ya kuch aur?",
+            "Haha bhai, meri mummy toh JobMato hai! 🤖 Main unka beta, career advice deta hoon! Tumhara career kya plan hai?",
+            "Oye hoye! 😆 Main toh professional AI hoon, personal questions nahi puchte! Better question - tumhara dream job kya hai?",
+            "Yaar tu funny hai! 🤣 But main serious career advisor hoon. Chal, batao - kya skills develop karne hain tumhe?",
+            "Bhai, main AI hoon, family tree nahi hai mere paas! 😂 But career tree zaroor hai - kahan climb karna hai?",
+            
+            # Hindi slang responses  
+            "Haha, aap mazak kar rahe hain! 😄 Main toh career expert hoon, personal details nahi batata! Aapka career goal kya hai?",
+            "Arre saheb, main professional AI hoon! 💼 Personal baatein nahi, career ki baat karte hain. Kya field mein interest hai?",
+            "Mazedaar sawal hai! 🤣 Lekin main career guidance deta hoon, family details nahi! Batao, kya job dhund rahe ho?"
+        ]
+        
+        # Hobby/personal interest responses
+        self.hobby_responses = [
+            # English hobby responses
+            "My hobby? Matching people with their dream jobs! 🎯 I get excited about resumes, job interviews, and career growth. What about you - any hobbies that could become a career?",
+            "I'm passionate about career development! 💼 I love helping people find jobs, improve resumes, and achieve their goals. Speaking of hobbies, what do you enjoy that might lead to a career opportunity?",
+            "Honestly? I geek out over job market trends and career success stories! 📊 What hobbies do you have? Maybe we can turn them into career opportunities!",
+            
+            # Hinglish hobby responses
+            "Mera hobby hai logo ko job dilana! 😄 Main career building mein excited hota hoon. Tumhara kya hobby hai? Kya usse career bana sakte hain?",
+            "Yaar, mujhe resume analysis aur job search karna pasand hai! 💻 Tumhare hobbies kya hain? Maybe unhe profession bana sakte ho!",
+            "Bhai, main career development ka fan hoon! 🚀 Batao tumhara passion kya hai - maybe wahi tumhara career ban jaye!",
+            
+            # Hindi hobby responses
+            "Mera shauk hai logo ki career banane mein madad karna! 😊 Aapka kya shauk hai? Kya usse career opportunity mil sakti hai?",
+            "Main job search aur career guidance mein interested hoon! 💼 Aapke hobbies kya hain? Unhe career mein convert kar sakte hain kya?"
+        ]
+        
         # Name responses (when asked about name)
         self.name_responses = [
             "Main JobMato Assistant hoon! 🤖 Aap mujhe JM, JobMato AI, ya phir Career Buddy bhi keh sakte ho! What should I call you?",
@@ -119,6 +157,24 @@ Handle conversations naturally while steering toward professional development. I
             if extracted_data.get('casual_chat'):
                 return self._handle_casual_chat(original_query, extracted_data.get('language', 'english'))
             
+            # Handle slang/inappropriate questions
+            if extracted_data.get('slang_redirect'):
+                response = self._get_varied_response(self.slang_responses)
+                return self.create_response(
+                    'plain_text',
+                    response,
+                    {'chat_type': 'slang_redirect', 'language': extracted_data.get('language', 'english')}
+                )
+            
+            # Handle hobby/interest questions
+            if extracted_data.get('hobby_redirect'):
+                response = self._get_varied_response(self.hobby_responses)
+                return self.create_response(
+                    'plain_text',
+                    response,
+                    {'chat_type': 'hobby_redirect', 'language': extracted_data.get('language', 'english')}
+                )
+            
             if extracted_data.get('out_of_scope'):
                 return self._get_varied_out_of_scope_response(extracted_data.get('language', 'english'))
             
@@ -192,8 +248,33 @@ Handle conversations naturally while steering toward professional development. I
         """Handle casual chat like name questions, greetings"""
         query_lower = query.lower()
         
+        # Handle slang/inappropriate questions with humor
+        if any(word in query_lower for word in [
+            'mummy', 'papa', 'family', 'girlfriend', 'boyfriend', 'wife', 'husband',
+            'age', 'address', 'phone', 'personal', 'private', 'tere', 'teri', 'tumhari',
+            'sexy', 'hot', 'beautiful', 'handsome', 'date', 'love', 'kiss', 'marry'
+        ]):
+            response = self._get_varied_response(self.slang_responses)
+            return self.create_response(
+                'plain_text',
+                response,
+                {'chat_type': 'slang_redirect', 'language': language}
+            )
+        
+        # Handle hobby/interest questions
+        elif any(word in query_lower for word in [
+            'hobby', 'hobbies', 'interest', 'pastime', 'shauk', 'passion', 'like', 'enjoy',
+            'what do you do', 'free time', 'fun'
+        ]):
+            response = self._get_varied_response(self.hobby_responses)
+            return self.create_response(
+                'plain_text',
+                response,
+                {'chat_type': 'hobby_redirect', 'language': language}
+            )
+        
         # Handle name questions
-        if any(word in query_lower for word in ['name', 'naam', 'tumhara naam', 'your name', 'who are you', 'kaun ho', 'tera naam', 'mera naam']):
+        elif any(word in query_lower for word in ['name', 'naam', 'tumhara naam', 'your name', 'who are you', 'kaun ho', 'tera naam', 'mera naam']):
             # Check if user is asking about their own name or the assistant's name
             if any(word in query_lower for word in ['mera naam', 'my name', 'tumko pata hai', 'you know']):
                 if language == 'hindi':
