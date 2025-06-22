@@ -146,4 +146,163 @@ User: "What projects should I build to get hired?"
 Project Agent: Uses profile tool → job search tool → suggests market-relevant projects
 ```
 
-The system ensures that **every agent can provide comprehensive, tool-enhanced responses** regardless of the initial query classification, making the chatbot more intelligent and helpful for users. 
+The system ensures that **every agent can provide comprehensive, tool-enhanced responses** regardless of the initial query classification, making the chatbot more intelligent and helpful for users.
+
+## 🚀 Production Deployment
+
+### Option 1: Local/Server Deployment
+
+#### Quick Setup & Run:
+```bash
+# Clone repository and navigate to project
+cd jobmato_chatbot
+
+# Setup and run locally
+chmod +x deploy_local.sh
+./deploy_local.sh setup    # Install dependencies
+./deploy_local.sh dev      # Start in development mode
+# OR
+./deploy_local.sh prod     # Start in production mode
+
+# Management commands
+./deploy_local.sh status   # Check application status
+./deploy_local.sh restart  # Restart the application
+./deploy_local.sh logs     # View and follow logs
+./deploy_local.sh stop     # Stop the application
+```
+
+#### Production Server Deployment:
+```bash
+# For production server deployment (requires root)
+chmod +x start_jobmato.sh
+sudo ./start_jobmato.sh setup    # Complete production setup
+sudo ./start_jobmato.sh start    # Start application
+
+# Management (with systemd service)
+sudo systemctl start jobmato-chatbot
+sudo systemctl stop jobmato-chatbot
+sudo systemctl restart jobmato-chatbot
+sudo systemctl status jobmato-chatbot
+```
+
+#### Environment Variables:
+```bash
+# Set custom port and host
+PORT=8080 HOST=0.0.0.0 ./deploy_local.sh prod
+
+# Production environment file
+cp env.example .env
+# Edit .env with your configuration:
+# - MONGODB_URI
+# - GEMINI_API_KEY
+# - Other settings
+```
+
+### Option 2: Docker Deployment
+
+#### Quick Docker Setup:
+```bash
+# Build and run with Docker Compose
+docker-compose up -d
+
+# View logs
+docker-compose logs -f jobmato-chatbot
+
+# Stop services
+docker-compose down
+
+# Rebuild after changes
+docker-compose up -d --build
+```
+
+#### Manual Docker Build:
+```bash
+# Build image
+docker build -t jobmato-chatbot .
+
+# Run container
+docker run -d \
+  --name jobmato-chatbot \
+  -p 5000:5000 \
+  -e MONGODB_URI="your_mongodb_uri" \
+  -e GEMINI_API_KEY="your_api_key" \
+  jobmato-chatbot
+```
+
+### Option 3: Cloud Deployment
+
+#### Heroku:
+```bash
+# Install Heroku CLI and login
+heroku create jobmato-chatbot
+
+# Set environment variables
+heroku config:set MONGODB_URI="your_mongodb_uri"
+heroku config:set GEMINI_API_KEY="your_api_key"
+
+# Deploy
+git push heroku main
+```
+
+#### AWS/Google Cloud/Azure:
+- Use the provided Dockerfile for container deployment
+- Configure environment variables in your cloud platform
+- Set up load balancer and auto-scaling as needed
+
+## 🔧 Production Configuration
+
+### Environment Variables:
+- `MONGODB_URI`: MongoDB connection string
+- `GEMINI_API_KEY`: Google Gemini API key
+- `PORT`: Application port (default: 5000)
+- `HOST`: Bind host (default: 0.0.0.0)
+- `FLASK_ENV`: production/development
+- `DEBUG`: true/false
+
+### Monitoring & Logs:
+- **Local deployment**: Logs in `./logs/` directory
+- **Production deployment**: Logs in `/var/log/jobmato_chatbot/`
+- **Docker**: Use `docker logs jobmato-chatbot`
+
+### Auto-Restart Features:
+- **Systemd service**: Automatic restart on failure
+- **Docker**: `restart: unless-stopped` policy
+- **Cron monitoring**: For non-root deployments
+- **Health checks**: Built-in health monitoring
+
+### Performance Optimization:
+- **Gunicorn**: Production WSGI server with eventlet workers
+- **Connection pooling**: MongoDB connection optimization
+- **Rate limiting**: Configurable request throttling
+- **Caching**: Memory management for better performance
+
+### Security:
+- **Non-root user**: Application runs as dedicated user
+- **Environment isolation**: Virtual environment separation
+- **Secure headers**: Production security headers
+- **HTTPS support**: SSL/TLS configuration ready
+
+## 🛠 Maintenance Commands
+
+```bash
+# Check application status
+./deploy_local.sh status
+# OR
+sudo systemctl status jobmato-chatbot
+
+# View real-time logs
+./deploy_local.sh logs
+# OR
+sudo journalctl -u jobmato-chatbot -f
+
+# Restart after configuration changes
+./deploy_local.sh restart
+# OR
+sudo systemctl restart jobmato-chatbot
+
+# Update application
+git pull
+./deploy_local.sh restart
+# OR
+docker-compose up -d --build
+``` 
