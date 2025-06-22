@@ -50,6 +50,20 @@ Tailor advice to the user's career stage and industry. Be practical, encouraging
             profile_data = await self.get_profile_data(token, base_url)
             resume_data = await self.get_resume_data(token, base_url)
             
+            # Check if we need resume data for personalized advice
+            needs_resume = any(keyword in original_query.lower() for keyword in [
+                'my resume', 'my cv', 'my experience', 'my skills', 'my background',
+                'career change', 'career transition', 'personalized', 'my career',
+                'what should i', 'advice for me', 'help me', 'my field', 'my industry'
+            ])
+            
+            if needs_resume and (not resume_data or resume_data.get('error')):
+                return self.create_response(
+                    'plain_text',
+                    'To provide you with personalized career advice based on your background and experience, I\'d like to analyze your resume. Please upload your resume so I can give you more targeted guidance for your specific situation.',
+                    {'needs_upload': True, 'advice_type': 'personalized'}
+                )
+            
             # Check if job search would be helpful for this advice
             job_data = None
             query_lower = original_query.lower()

@@ -429,6 +429,113 @@ def resume_upload_webhook():
             }
         }), 500
 
+@app.route('/upload-resume', methods=['POST'])
+def upload_resume_ui():
+    """UI-specific endpoint for resume uploads with FormData"""
+    try:
+        # Check if file is present
+        if 'resume' not in request.files:
+            return jsonify({
+                'success': False,
+                'error': 'No resume file provided'
+            }), 400
+        
+        file = request.files['resume']
+        if file.filename == '':
+            return jsonify({
+                'success': False,
+                'error': 'No file selected'
+            }), 400
+        
+        # Get form data
+        token = request.form.get('token', '')
+        session_id = request.form.get('session_id', 'default')
+        
+        # Validate file type
+        allowed_extensions = {'.pdf', '.doc', '.docx'}
+        file_ext = os.path.splitext(file.filename)[1].lower()
+        if file_ext not in allowed_extensions:
+            return jsonify({
+                'success': False,
+                'error': 'Only PDF and Word documents are allowed'
+            }), 400
+        
+        # Validate file size (10MB limit)
+        file.seek(0, 2)  # Seek to end
+        file_size = file.tell()
+        file.seek(0)  # Reset to beginning
+        
+        if file_size > 10 * 1024 * 1024:  # 10MB
+            return jsonify({
+                'success': False,
+                'error': 'File size must be less than 10MB'
+            }), 400
+        
+        logger.info(f"📤 Uploading resume: {file.filename} ({file_size} bytes) for session: {session_id}")
+        
+        # Use resume upload tool from any agent (they all inherit from JobMatoToolsMixin)
+        try:
+            # Create a temporary file-like object to pass to the tool
+            file_content = file.read()
+            file.seek(0)  # Reset for potential future use
+            
+            # Use the upload tool
+            upload_result = asyncio.run(
+                chatbot.job_search_agent.upload_resume(
+                    file_content=file_content,
+                    filename=file.filename,
+                    token=token
+                )
+            )
+            
+            if upload_result.get('success'):
+                logger.info(f"✅ Resume uploaded successfully for session: {session_id}")
+                
+                # Store upload info in memory manager if available
+                if hasattr(chatbot, 'memory_manager') and chatbot.memory_manager:
+                    try:
+                        asyncio.run(chatbot.memory_manager.add_message(
+                            session_id=session_id,
+                            message=f"Resume '{file.filename}' uploaded successfully",
+                            sender='system',
+                            metadata={
+                                'event_type': 'resume_upload',
+                                'filename': file.filename,
+                                'upload_id': upload_result.get('upload_id'),
+                                'timestamp': datetime.now().isoformat()
+                            }
+                        ))
+                    except Exception as e:
+                        logger.warning(f"⚠️ Could not store upload event in memory: {str(e)}")
+                
+                return jsonify({
+                    'success': True,
+                    'message': 'Resume uploaded successfully!',
+                    'upload_id': upload_result.get('upload_id'),
+                    'filename': file.filename
+                })
+            else:
+                error_msg = upload_result.get('error', 'Upload failed')
+                logger.error(f"❌ Resume upload failed: {error_msg}")
+                return jsonify({
+                    'success': False,
+                    'error': error_msg
+                }), 400
+                
+        except Exception as tool_error:
+            logger.error(f"❌ Resume upload tool error: {str(tool_error)}")
+            return jsonify({
+                'success': False,
+                'error': f'Upload processing failed: {str(tool_error)}'
+            }), 500
+            
+    except Exception as e:
+        logger.error(f"❌ Error in UI resume upload: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': 'An unexpected error occurred during upload'
+        }), 500
+
 if __name__ == '__main__':
     # Use SocketIO's run method instead of Flask's run method
     # Port 5001 to avoid conflicts with macOS AirPlay Receiver on port 5000

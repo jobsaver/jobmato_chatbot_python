@@ -66,6 +66,20 @@ Keep responses professional, helpful, and personalized using available data."""
                 profile_data = await self.get_profile_data(token, base_url)
                 resume_data = await self.get_resume_data(token, base_url)
             
+            # Check if user is asking for personalized help but no resume is available
+            wants_personalized = any(keyword in query_lower for keyword in [
+                'my career', 'my resume', 'my experience', 'my skills', 'help me',
+                'what should i', 'advice for me', 'about me', 'my background',
+                'recommend for me', 'suggest for me', 'personalized', 'tailored'
+            ])
+            
+            if wants_personalized and (not resume_data or resume_data.get('error')):
+                return self.create_response(
+                    'plain_text',
+                    'I\'d love to help you with personalized advice! To give you the most relevant guidance, please upload your resume so I can understand your background and provide tailored recommendations.',
+                    {'needs_upload': True, 'chat_type': 'personalized_help'}
+                )
+            
             # Use job search tool if query is about jobs, market, opportunities
             if any(keyword in query_lower for keyword in [
                 'job', 'jobs', 'market', 'opportunities', 'hiring', 'openings', 

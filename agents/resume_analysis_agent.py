@@ -56,8 +56,8 @@ Always provide specific, actionable recommendations with examples. Base your ana
             if resume_data.get('error'):
                 return self.create_response(
                     'plain_text',
-                    'I couldn\'t access your resume data. Please make sure you have uploaded a resume first.',
-                    {'error': 'No resume data available'}
+                    'I need to analyze your resume, but I don\'t see one uploaded yet. Please upload your resume so I can provide you with a comprehensive analysis including formatting tips, content improvements, and market competitiveness assessment.',
+                    {'error': 'No resume data available', 'needs_upload': True}
                 )
             
             # Build context for analysis

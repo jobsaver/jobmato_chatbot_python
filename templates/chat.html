@@ -192,6 +192,90 @@
             transform: none;
         }
 
+        .upload-button {
+            background: linear-gradient(135deg, #059669, #10b981);
+            color: white;
+            border: none;
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.2rem;
+            margin-right: 10px;
+        }
+
+        .upload-button:hover {
+            transform: scale(1.05);
+            box-shadow: 0 5px 15px rgba(16, 185, 129, 0.3);
+        }
+
+        .upload-button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .upload-button.show {
+            display: flex;
+        }
+
+        .upload-button.hide {
+            display: none;
+        }
+
+        .file-input {
+            display: none;
+        }
+
+        .upload-progress {
+            display: none;
+            background: #f0f9ff;
+            border: 1px solid #0ea5e9;
+            border-radius: 12px;
+            padding: 15px;
+            margin-top: 10px;
+            text-align: center;
+        }
+
+        .upload-progress.show {
+            display: block;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 8px;
+            background: #e5e7eb;
+            border-radius: 4px;
+            overflow: hidden;
+            margin: 10px 0;
+        }
+
+        .progress-bar-fill {
+            height: 100%;
+            background: linear-gradient(135deg, #059669, #10b981);
+            width: 0%;
+            transition: width 0.3s ease;
+        }
+
+        .upload-message {
+            background: #f0fdf4;
+            border: 1px solid #22c55e;
+            border-radius: 12px;
+            padding: 15px;
+            margin-top: 10px;
+            color: #166534;
+        }
+
+        .upload-message.error {
+            background: #fef2f2;
+            border-color: #ef4444;
+            color: #dc2626;
+        }
+
         .typing-indicator {
             display: none;
             padding: 15px 20px;
@@ -313,6 +397,10 @@
         
         <div class="chat-input-container">
             <div class="input-wrapper">
+                <input type="file" id="fileInput" class="file-input" accept=".pdf,.doc,.docx" />
+                <button id="uploadButton" class="upload-button hide" title="Upload Resume">
+                    📄
+                </button>
                 <textarea 
                     id="messageInput" 
                     class="chat-input" 
@@ -322,6 +410,12 @@
                 <button id="sendButton" class="send-button">
                     ➤
                 </button>
+            </div>
+            <div id="uploadProgress" class="upload-progress">
+                <div id="uploadText">Uploading resume...</div>
+                <div class="progress-bar">
+                    <div id="progressBarFill" class="progress-bar-fill"></div>
+                </div>
             </div>
         </div>
     </div>
@@ -335,6 +429,11 @@
                 this.chatMessages = document.getElementById('chatMessages');
                 this.messageInput = document.getElementById('messageInput');
                 this.sendButton = document.getElementById('sendButton');
+                this.uploadButton = document.getElementById('uploadButton');
+                this.fileInput = document.getElementById('fileInput');
+                this.uploadProgress = document.getElementById('uploadProgress');
+                this.uploadText = document.getElementById('uploadText');
+                this.progressBarFill = document.getElementById('progressBarFill');
                 this.typingIndicator = document.getElementById('typingIndicator');
                 this.sessionId = this.generateSessionId();
                 this.socket = null;
@@ -374,8 +473,28 @@
                     console.log('💬 Received response:', data);
                     this.hideTypingIndicator();
                     this.addMessage(data.response.content, 'assistant', data.response);
+                    
+                    // Check if response suggests uploading resume
+                    this.checkForUploadSuggestion(data.response);
+                    
                     this.sendButton.disabled = false;
                     this.messageInput.focus();
+                });
+                
+                this.socket.on('upload_complete', (data) => {
+                    console.log('📤 Upload complete:', data);
+                    this.hideUploadProgress();
+                    if (data.success) {
+                        this.showUploadMessage('✅ Resume uploaded successfully!', false);
+                        this.hideUploadButton();
+                    } else {
+                        this.showUploadMessage('❌ Upload failed: ' + data.error, true);
+                    }
+                });
+                
+                this.socket.on('upload_progress', (data) => {
+                    console.log('📊 Upload progress:', data);
+                    this.updateUploadProgress(data.progress);
                 });
                 
                 this.socket.on('typing_start', () => {
@@ -408,6 +527,8 @@
             
             initializeEventListeners() {
                 this.sendButton.addEventListener('click', () => this.sendMessage());
+                this.uploadButton.addEventListener('click', () => this.fileInput.click());
+                this.fileInput.addEventListener('change', (e) => this.handleFileUpload(e));
                 this.messageInput.addEventListener('keypress', (e) => {
                     if (e.key === 'Enter' && !e.shiftKey) {
                         e.preventDefault();
@@ -530,6 +651,146 @@
                 setTimeout(() => {
                     this.chatMessages.scrollTop = this.chatMessages.scrollHeight;
                 }, 100);
+            }
+            
+            checkForUploadSuggestion(response) {
+                // Check if the response suggests uploading a resume
+                const content = response.content.toLowerCase();
+                const uploadKeywords = [
+                    'upload your resume',
+                    'upload resume',
+                    'provide your resume',
+                    'share your resume',
+                    'attach your resume',
+                    'send your resume',
+                    'need your resume',
+                    'resume upload',
+                    'resume required'
+                ];
+                
+                const shouldShowUpload = uploadKeywords.some(keyword => content.includes(keyword));
+                
+                if (shouldShowUpload) {
+                    this.showUploadButton();
+                }
+            }
+            
+            showUploadButton() {
+                this.uploadButton.classList.remove('hide');
+                this.uploadButton.classList.add('show');
+            }
+            
+            hideUploadButton() {
+                this.uploadButton.classList.remove('show');
+                this.uploadButton.classList.add('hide');
+            }
+            
+            handleFileUpload(event) {
+                const file = event.target.files[0];
+                if (!file) return;
+                
+                // Validate file type
+                const allowedTypes = ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
+                if (!allowedTypes.includes(file.type)) {
+                    this.showUploadMessage('❌ Please select a PDF or Word document', true);
+                    return;
+                }
+                
+                // Validate file size (10MB limit)
+                if (file.size > 10 * 1024 * 1024) {
+                    this.showUploadMessage('❌ File size must be less than 10MB', true);
+                    return;
+                }
+                
+                this.uploadResume(file);
+            }
+            
+            uploadResume(file) {
+                this.showUploadProgress();
+                this.uploadText.textContent = `Uploading ${file.name}...`;
+                
+                const formData = new FormData();
+                formData.append('resume', file);
+                formData.append('session_id', this.sessionId);
+                formData.append('token', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjY4NDcxMDBlYTQxN2IwMGEyMGYzZjA1MSIsImVtYWlsIjoiaGFja3lhYmhheUBnbWFpbC5jb20iLCJpYXQiOjE3NTA1Nzk4MDYsImV4cCI6MTc1MTE4NDYwNn0.5cMF3TDItaJt7JPONtHEF3lAe-qgL8Q8ujwMagC1fVo');
+                
+                // Use XMLHttpRequest for upload progress tracking
+                const xhr = new XMLHttpRequest();
+                
+                xhr.upload.addEventListener('progress', (e) => {
+                    if (e.lengthComputable) {
+                        const percentComplete = (e.loaded / e.total) * 100;
+                        this.updateUploadProgress(percentComplete);
+                    }
+                });
+                
+                xhr.addEventListener('load', () => {
+                    if (xhr.status === 200) {
+                        try {
+                            const response = JSON.parse(xhr.responseText);
+                            this.hideUploadProgress();
+                            if (response.success) {
+                                this.showUploadMessage('✅ Resume uploaded successfully!', false);
+                                this.addMessage('I\'ve uploaded your resume. How can I help you with it?', 'assistant');
+                                this.hideUploadButton();
+                            } else {
+                                this.showUploadMessage('❌ Upload failed: ' + response.error, true);
+                            }
+                        } catch (e) {
+                            this.hideUploadProgress();
+                            this.showUploadMessage('❌ Upload failed: Invalid response', true);
+                        }
+                    } else {
+                        this.hideUploadProgress();
+                        this.showUploadMessage('❌ Upload failed: Server error', true);
+                    }
+                });
+                
+                xhr.addEventListener('error', () => {
+                    this.hideUploadProgress();
+                    this.showUploadMessage('❌ Upload failed: Network error', true);
+                });
+                
+                xhr.open('POST', '/upload-resume');
+                xhr.send(formData);
+                
+                // Clear file input
+                this.fileInput.value = '';
+            }
+            
+            showUploadProgress() {
+                this.uploadProgress.classList.add('show');
+                this.updateUploadProgress(0);
+            }
+            
+            hideUploadProgress() {
+                this.uploadProgress.classList.remove('show');
+            }
+            
+            updateUploadProgress(percentage) {
+                this.progressBarFill.style.width = `${percentage}%`;
+                if (percentage < 100) {
+                    this.uploadText.textContent = `Uploading... ${Math.round(percentage)}%`;
+                } else {
+                    this.uploadText.textContent = 'Processing...';
+                }
+            }
+            
+            showUploadMessage(message, isError = false) {
+                const messageDiv = document.createElement('div');
+                messageDiv.className = `upload-message ${isError ? 'error' : ''}`;
+                messageDiv.textContent = message;
+                
+                // Add to chat area
+                this.chatMessages.appendChild(messageDiv);
+                this.scrollToBottom();
+                
+                // Auto-remove after 5 seconds
+                setTimeout(() => {
+                    if (messageDiv.parentNode) {
+                        messageDiv.parentNode.removeChild(messageDiv);
+                    }
+                }, 5000);
             }
         }
         
