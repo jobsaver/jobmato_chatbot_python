@@ -533,8 +533,88 @@ def upload_resume_ui():
             'error': 'An unexpected error occurred during upload'
         }), 500
 
+@socketio.on('init_chat')
+def handle_init_chat(data):
+    """Initialize a new chat session or load existing"""
+    try:
+        session_id = data.get('sessionId', request.sid)
+        user_id = data.get('userId', 'anonymous')
+        token = data.get('token', '')
+        
+        # Join the session room
+        join_room(session_id)
+        
+        # Check authentication if token provided
+        authenticated = False
+        if token:
+            # Here you would validate the token
+            # For now, we'll assume any non-empty token is valid
+            authenticated = bool(token)
+        
+        # Emit authentication status
+        emit('auth_status', {
+            'authenticated': authenticated,
+            'userId': user_id if authenticated else None,
+            'socketId': request.sid
+        })
+        
+        # Emit session status
+        emit('session_status', {
+            'connected': True,
+            'sessionId': session_id,
+            'userId': user_id if authenticated else 'anonymous',
+            'timestamp': datetime.now().isoformat()
+        })
+        
+        # Emit initialization response
+        emit('init_response', {
+            'connected': True,
+            'sessionId': session_id,
+            'userId': user_id if authenticated else 'anonymous',
+            'timestamp': datetime.now().isoformat()
+        })
+        
+        logger.info(f"🔄 Chat session initialized: {session_id} for user: {user_id}")
+        
+        # Get available agents
+        emit('available_agents', {
+            'availableAgents': ['job_search', 'resume', 'career_advice', 'project', 'general'],
+            'message': 'These agent types are available for your queries'
+        })
+        
+    except Exception as e:
+        logger.error(f"❌ Error initializing chat: {str(e)}")
+        emit('error', {
+            'error': 'Failed to initialize chat session',
+            'type': 'session_error'
+        })
+
+@socketio.on('typing_status')
+def handle_typing_status(data):
+    """Broadcast typing status to room"""
+    try:
+        is_typing = data.get('isTyping', False)
+        session_id = data.get('sessionId', request.sid)
+        
+        # Broadcast typing status to the room
+        emit('typing_status', {
+            'isTyping': is_typing
+        }, room=session_id)
+        
+    except Exception as e:
+        logger.error(f"❌ Error handling typing status: {str(e)}")
+
+@socketio.on('ping')
+def handle_ping():
+    """Connection health check"""
+    try:
+        emit('pong')
+        logger.debug(f"🏓 Ping-pong with client: {request.sid}")
+    except Exception as e:
+        logger.error(f"❌ Error handling ping: {str(e)}")
+
 if __name__ == '__main__':
     # Use SocketIO's run method instead of Flask's run method
     # Port 5001 to avoid conflicts with macOS AirPlay Receiver on port 5000
     port = int(os.environ.get('PORT', 5002))
-    socketio.run(app, debug=True, host='0.0.0.0', port=port) 
+    socketio.run(app, debug=True, host='0.0.0.0', port=port)
