@@ -130,7 +130,17 @@ class BaseAgent(ABC, JobMatoToolsMixin):
         content: str, 
         metadata: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
-        """Create a standardized response format"""
+        """Create a standardized response format with enforced allowed types (except job agent)"""
+        allowed_types = {
+            "plain_text",
+            "markdown",
+            "resume_analysis",
+            "career_advice",
+            "project_suggestion",
+            "resume_upload_required"
+        }
+        if response_type not in allowed_types:
+            raise ValueError(f"Response type '{response_type}' is not allowed. Allowed types: {allowed_types}")
         return {
             "content": content.strip(),
             "type": response_type,
