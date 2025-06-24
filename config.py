@@ -22,24 +22,122 @@ class Config:
     MONGODB_DATABASE = 'admin'
     MONGODB_COLLECTION = 'mato_chats'
     
+    # Redis configuration for WebSocket session management
+    REDIS_URL = os.environ.get('REDIS_URL', 'redis://localhost:6379')
+    REDIS_DB = int(os.environ.get('REDIS_DB', '0'))
+    REDIS_PASSWORD = os.environ.get('REDIS_PASSWORD')
+    REDIS_SSL = os.environ.get('REDIS_SSL', 'False').lower() in ['true', '1', 'yes']
+    
     # Session configuration
     SESSION_TIMEOUT_HOURS = int(os.environ.get('SESSION_TIMEOUT_HOURS', '24'))
     MAX_CONVERSATION_HISTORY = int(os.environ.get('MAX_CONVERSATION_HISTORY', '10'))
     
+    # WebSocket configuration
+    SOCKETIO_CONNECT_TIMEOUT = int(os.environ.get('SOCKETIO_CONNECT_TIMEOUT', '60000'))
+    SOCKETIO_PING_TIMEOUT = int(os.environ.get('SOCKETIO_PING_TIMEOUT', '60000'))
+    SOCKETIO_PING_INTERVAL = int(os.environ.get('SOCKETIO_PING_INTERVAL', '25000'))
+    
+    # Server configuration
+    PORT = int(os.environ.get('PORT', '5003'))
+    HOST = os.environ.get('HOST', '0.0.0.0')
+    
+    # JWT configuration
+    JWT_SECRET = os.environ.get('JWT_SECRET') or 'your_jwt_secret_here'
+    JWT_ALGORITHM = 'HS256'
+    JWT_EXPIRATION_HOURS = 24
+    
+    # Rate limiting configuration
+    RATE_LIMIT_REQUESTS = int(os.environ.get('RATE_LIMIT_REQUESTS', '100'))
+    RATE_LIMIT_WINDOW = int(os.environ.get('RATE_LIMIT_WINDOW', '3600'))
+    
     # Logging configuration
     LOG_LEVEL = os.environ.get('LOG_LEVEL', 'INFO')
+    
+    # File upload configuration
+    MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
+    ALLOWED_EXTENSIONS = {'.pdf', '.doc', '.docx'}
+    
+    # Chat configuration
+    MAX_MESSAGE_LENGTH = 1000
+    TYPING_TIMEOUT_SECONDS = 30
+    
+    # Agent configuration
+    AGENT_TIMEOUT_SECONDS = 30
+    MAX_RETRIES = 3
+    
+ 
+    # WebSocket Events Configuration
+    SOCKET_EVENTS = {
+        'connect': 'connect',
+        'disconnect': 'disconnect',
+        'init_chat': 'init_chat',
+        'send_message': 'send_message',
+        'receive_message': 'receive_message',
+        'typing_status': 'typing_status',
+        'ping': 'ping',
+        'pong': 'pong',
+        'auth_status': 'auth_status',
+        'session_status': 'session_status',
+        'error': 'error',
+        'chat_history': 'chat_history',
+        'clear_session': 'clear_session'
+    }
+    
+    # Agent Types Configuration
+    AGENT_TYPES = {
+        'job_search': 'Job Search Agent',
+        'resume': 'Resume Analysis Agent',
+        'career_advice': 'Career Advice Agent',
+        'project': 'Project Suggestion Agent',
+        'general': 'General Chat Agent',
+        'profile': 'Profile Info Agent'
+    }
+    
+    # Response Types Configuration
+    RESPONSE_TYPES = {
+        'plain_text': 'Plain Text Response',
+        'job_card': 'Job Card Response',
+        'career_advice': 'Career Advice Response',
+        'resume_upload_success': 'Resume Upload Success',
+        'error': 'Error Response'
+    }
+    
+    # Error Codes Configuration
+    ERROR_CODES = {
+        'AUTH_FAILED': 'Authentication failed',
+        'INVALID_TOKEN': 'Invalid JWT token',
+        'SESSION_NOT_FOUND': 'Session not found',
+        'MESSAGE_ERROR': 'Message processing error',
+        'REDIS_ERROR': 'Redis connection error',
+        'AGENT_ERROR': 'Agent processing error'
+    }
 
 class DevelopmentConfig(Config):
     """Development configuration"""
     DEBUG = True
+    LOG_LEVEL = 'DEBUG'
+    REDIS_SSL = False
+    REDIS_URL = 'redis://localhost:6379'
 
 class ProductionConfig(Config):
     """Production configuration"""
     DEBUG = False
+    LOG_LEVEL = 'WARNING'
+    REDIS_SSL = True
+    # Production Redis URL should be set via environment variable
+
+class TestingConfig(Config):
+    """Testing configuration"""
+    TESTING = True
+    DEBUG = True
+    LOG_LEVEL = 'DEBUG'
+    REDIS_URL = 'redis://localhost:6379'
+    REDIS_SSL = False
 
 # Configuration dictionary
 config = {
     'development': DevelopmentConfig,
     'production': ProductionConfig,
+    'testing': TestingConfig,
     'default': DevelopmentConfig
 } 

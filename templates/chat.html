@@ -63,6 +63,10 @@
             animation: pulse 2s infinite;
         }
 
+        .status-indicator.disconnected {
+            background: #ef4444;
+        }
+
         @keyframes pulse {
             0% { opacity: 1; }
             50% { opacity: 0.5; }
@@ -349,6 +353,38 @@
             color: #374151;
         }
 
+        .auth-status {
+            background: #fef3c7;
+            border: 1px solid #f59e0b;
+            border-radius: 12px;
+            padding: 15px;
+            margin: 10px 0;
+            text-align: center;
+            color: #92400e;
+        }
+
+        .auth-status.error {
+            background: #fef2f2;
+            border-color: #ef4444;
+            color: #dc2626;
+        }
+
+        .auth-status.success {
+            background: #f0fdf4;
+            border-color: #22c55e;
+            color: #166534;
+        }
+
+        .session-info {
+            background: #f0f9ff;
+            border: 1px solid #0ea5e9;
+            border-radius: 12px;
+            padding: 10px 15px;
+            margin: 10px 0;
+            font-size: 0.85rem;
+            color: #0369a1;
+        }
+
         /* Responsive design */
         @media (max-width: 768px) {
             .chat-container {
@@ -374,7 +410,7 @@
 <body>
     <div class="chat-container">
         <div class="chat-header">
-            <div class="status-indicator"></div>
+            <div class="status-indicator" id="statusIndicator"></div>
             <h1>🎯 JobMato Assistant</h1>
             <p>Your AI-powered career companion</p>
         </div>
@@ -435,76 +471,102 @@
                 this.uploadText = document.getElementById('uploadText');
                 this.progressBarFill = document.getElementById('progressBarFill');
                 this.typingIndicator = document.getElementById('typingIndicator');
-                this.sessionId = this.generateSessionId();
+                this.statusIndicator = document.getElementById('statusIndicator');
+                this.sessionId = null;
+                this.userId = null;
                 this.socket = null;
                 this.connected = false;
+                this.authenticated = false;
+                
+                // JWT Token for authentication (in production, this should come from your auth system)
+                this.jwtToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjY4NDcxMDBlYTQxN2IwMGEyMGYzZjA1MSIsImVtYWlsIjoiaGFja3lhYmhheUBnbWFpbC5jb20iLCJpYXQiOjE3NTA1Nzk4MDYsImV4cCI6MTc1MTE4NDYwNn0.5cMF3TDItaJt7JPONtHEF3lAe-qgL8Q8ujwMagC1fVo';
                 
                 this.initializeWebSocket();
                 this.initializeEventListeners();
                 this.autoResizeTextarea();
             }
-            
-            generateSessionId() {
-                return 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
-            }
 
             initializeWebSocket() {
-                // Initialize Socket.IO connection
-                this.socket = io();
+                // Initialize Socket.IO connection with authentication
+                this.socket = io({
+                    query: { token: this.jwtToken },
+                    transports: ['websocket', 'polling'],
+                    timeout: 60000
+                });
                 
                 // Connection event handlers
-                this.socket.on('connect', (data) => {
-                    console.log('🔌 Connected to server:', data);
+                this.socket.on('connect', () => {
+                    console.log('🔌 Connected to server');
                     this.connected = true;
-                    this.socket.emit('join_session', { session_id: this.sessionId });
+                    this.updateConnectionStatus(true);
                 });
                 
                 this.socket.on('disconnect', () => {
                     console.log('🔌 Disconnected from server');
                     this.connected = false;
+                    this.authenticated = false;
+                    this.updateConnectionStatus(false);
                 });
                 
-                this.socket.on('session_joined', (data) => {
-                    console.log('🏠 Joined session:', data.session_id);
+                // Authentication event handlers
+                this.socket.on('auth_status', (data) => {
+                    console.log('🔐 Authentication status:', data);
+                    if (data.authenticated) {
+                        this.authenticated = true;
+                        this.userId = data.userId;
+                        this.showAuthStatus('✅ Authenticated successfully', 'success');
+                        this.initializeChat();
+                    } else {
+                        this.authenticated = false;
+                        this.showAuthStatus('❌ Authentication failed', 'error');
+                    }
                 });
                 
-                // Chat event handlers
-                this.socket.on('chat_response', (data) => {
-                    console.log('💬 Received response:', data);
+                this.socket.on('auth_error', (data) => {
+                    console.error('❌ Authentication error:', data);
+                    this.authenticated = false;
+                    this.showAuthStatus('❌ Authentication error: ' + data.message, 'error');
+                });
+                
+                // Session event handlers
+                this.socket.on('session_status', (data) => {
+                    console.log('📋 Session status:', data);
+                    if (data.connected) {
+                        this.sessionId = data.sessionId;
+                        this.showSessionInfo(`Session: ${data.sessionId}`);
+                    } else {
+                        this.showAuthStatus('❌ Session initialization failed: ' + data.error, 'error');
+                    }
+                });
+                
+                this.socket.on('init_response', (data) => {
+                    console.log('🚀 Chat initialized:', data);
+                });
+                
+                // Message event handlers
+                this.socket.on('receive_message', (data) => {
+                    console.log('💬 Received message:', data);
                     this.hideTypingIndicator();
-                    this.addMessage(data.response.content, 'assistant', data.response);
+                    this.addMessage(data.content, 'assistant', data);
                     
                     // Check if response suggests uploading resume
-                    this.checkForUploadSuggestion(data.response);
+                    this.checkForUploadSuggestion(data);
                     
                     this.sendButton.disabled = false;
                     this.messageInput.focus();
                 });
                 
-                this.socket.on('upload_complete', (data) => {
-                    console.log('📤 Upload complete:', data);
-                    this.hideUploadProgress();
-                    if (data.success) {
-                        this.showUploadMessage('✅ Resume uploaded successfully!', false);
-                        this.hideUploadButton();
+                // Typing status handlers
+                this.socket.on('typing_status', (data) => {
+                    console.log('📝 Typing status:', data);
+                    if (data.isTyping) {
+                        this.showTypingIndicator();
                     } else {
-                        this.showUploadMessage('❌ Upload failed: ' + data.error, true);
+                        this.hideTypingIndicator();
                     }
                 });
                 
-                this.socket.on('upload_progress', (data) => {
-                    console.log('📊 Upload progress:', data);
-                    this.updateUploadProgress(data.progress);
-                });
-                
-                this.socket.on('typing_start', () => {
-                    this.showTypingIndicator();
-                });
-                
-                this.socket.on('typing_stop', () => {
-                    this.hideTypingIndicator();
-                });
-                
+                // Error handlers
                 this.socket.on('error', (data) => {
                     console.error('❌ Socket error:', data);
                     this.hideTypingIndicator();
@@ -513,15 +575,35 @@
                     this.messageInput.focus();
                 });
                 
-                // Session management handlers
-                this.socket.on('session_history', (data) => {
-                    console.log('📜 Session history:', data);
-                    // Handle session history if needed
+                // Health check handlers
+                this.socket.on('pong', () => {
+                    console.log('🏓 Pong received');
                 });
                 
+                // Available agents handler
+                this.socket.on('available_agents', (data) => {
+                    console.log('🤖 Available agents:', data);
+                });
+                
+                // Chat history handler
+                this.socket.on('chat_history', (data) => {
+                    console.log('📜 Chat history:', data);
+                    if (data.messages && data.messages.length > 0) {
+                        this.loadChatHistory(data.messages);
+                    }
+                });
+                
+                // Session management handlers
                 this.socket.on('session_cleared', (data) => {
                     console.log('🗑️ Session cleared:', data.message);
                     this.clearChatMessages();
+                });
+            }
+            
+            initializeChat() {
+                // Initialize chat session
+                this.socket.emit('init_chat', {
+                    sessionId: this.sessionId // Optional, will create new if not provided
                 });
             }
             
@@ -535,6 +617,13 @@
                         this.sendMessage();
                     }
                 });
+                
+                // Start ping/pong for connection health
+                setInterval(() => {
+                    if (this.connected && this.authenticated) {
+                        this.socket.emit('ping');
+                    }
+                }, 30000); // Ping every 30 seconds
             }
             
             autoResizeTextarea() {
@@ -546,7 +635,7 @@
             
             sendMessage() {
                 const message = this.messageInput.value.trim();
-                if (!message || !this.connected) return;
+                if (!message || !this.connected || !this.authenticated) return;
                 
                 // Clear input and disable button
                 this.messageInput.value = '';
@@ -556,12 +645,66 @@
                 // Add user message
                 this.addMessage(message, 'user');
                 
+                // Send typing status
+                this.socket.emit('typing_status', { isTyping: true });
+                
                 // Send message via WebSocket
-                this.socket.emit('chat_message', {
-                    message: message,
-                    session_id: this.sessionId,
-                    token: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjY4NDcxMDBlYTQxN2IwMGEyMGYzZjA1MSIsImVtYWlsIjoiaGFja3lhYmhheUBnbWFpbC5jb20iLCJpYXQiOjE3NTA1Nzk4MDYsImV4cCI6MTc1MTE4NDYwNn0.5cMF3TDItaJt7JPONtHEF3lAe-qgL8Q8ujwMagC1fVo', // In production, this should be a real token
-                    baseUrl: 'http://localhost:5001'
+                this.socket.emit('send_message', {
+                    message: message
+                });
+            }
+            
+            updateConnectionStatus(connected) {
+                if (connected) {
+                    this.statusIndicator.classList.remove('disconnected');
+                } else {
+                    this.statusIndicator.classList.add('disconnected');
+                }
+            }
+            
+            showAuthStatus(message, type = 'info') {
+                const statusDiv = document.createElement('div');
+                statusDiv.className = `auth-status ${type}`;
+                statusDiv.textContent = message;
+                
+                this.chatMessages.appendChild(statusDiv);
+                this.scrollToBottom();
+                
+                // Auto-remove after 5 seconds
+                setTimeout(() => {
+                    if (statusDiv.parentNode) {
+                        statusDiv.parentNode.removeChild(statusDiv);
+                    }
+                }, 5000);
+            }
+            
+            showSessionInfo(info) {
+                const infoDiv = document.createElement('div');
+                infoDiv.className = 'session-info';
+                infoDiv.textContent = info;
+                
+                this.chatMessages.appendChild(infoDiv);
+                this.scrollToBottom();
+                
+                // Auto-remove after 3 seconds
+                setTimeout(() => {
+                    if (infoDiv.parentNode) {
+                        infoDiv.parentNode.removeChild(infoDiv);
+                    }
+                }, 3000);
+            }
+            
+            loadChatHistory(messages) {
+                // Clear existing messages except welcome
+                const welcomeMessage = this.chatMessages.querySelector('.welcome-message');
+                this.chatMessages.innerHTML = '';
+                if (welcomeMessage) {
+                    this.chatMessages.appendChild(welcomeMessage);
+                }
+                
+                // Load history messages
+                messages.forEach(msg => {
+                    this.addMessage(msg.content, msg.sender === 'user' ? 'user' : 'assistant');
                 });
             }
             
@@ -588,6 +731,8 @@
                 // Handle different response types
                 if (fullResponse && fullResponse.type === 'job_card' && fullResponse.metadata && fullResponse.metadata.jobs) {
                     messageContent.innerHTML = this.formatJobResponse(content, fullResponse.metadata.jobs);
+                } else if (fullResponse && fullResponse.type === 'resume_upload_success') {
+                    messageContent.innerHTML = this.formatResumeUploadSuccess(content, fullResponse.metadata);
                 } else {
                     messageContent.innerHTML = this.formatTextContent(content);
                 }
@@ -625,6 +770,20 @@
                     if (jobs.length > 3) {
                         html += `<p style="margin-top: 10px; font-style: italic;">And ${jobs.length - 3} more jobs...</p>`;
                     }
+                }
+                
+                return html;
+            }
+            
+            formatResumeUploadSuccess(content, metadata) {
+                let html = `<p>${content}</p>`;
+                
+                if (metadata && metadata.availableOptions) {
+                    html += `<div style="margin-top: 15px;"><strong>Available options:</strong><ul>`;
+                    metadata.availableOptions.forEach(option => {
+                        html += `<li>${option}</li>`;
+                    });
+                    html += `</ul></div>`;
                 }
                 
                 return html;
@@ -711,8 +870,8 @@
                 
                 const formData = new FormData();
                 formData.append('resume', file);
-                formData.append('session_id', this.sessionId);
-                formData.append('token', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjY4NDcxMDBlYTQxN2IwMGEyMGYzZjA1MSIsImVtYWlsIjoiaGFja3lhYmhheUBnbWFpbC5jb20iLCJpYXQiOjE3NTA1Nzk4MDYsImV4cCI6MTc1MTE4NDYwNn0.5cMF3TDItaJt7JPONtHEF3lAe-qgL8Q8ujwMagC1fVo');
+                formData.append('session_id', this.sessionId || 'default');
+                formData.append('token', this.jwtToken);
                 
                 // Use XMLHttpRequest for upload progress tracking
                 const xhr = new XMLHttpRequest();
@@ -731,7 +890,6 @@
                             this.hideUploadProgress();
                             if (response.success) {
                                 this.showUploadMessage('✅ Resume uploaded successfully!', false);
-                                this.addMessage('I\'ve uploaded your resume. How can I help you with it?', 'assistant');
                                 this.hideUploadButton();
                             } else {
                                 this.showUploadMessage('❌ Upload failed: ' + response.error, true);

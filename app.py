@@ -1,5 +1,5 @@
 from flask import Flask, request, jsonify, render_template
-from flask_socketio import SocketIO, emit, join_room, leave_room
+from flask_socketio import SocketIO, emit, join_room, leave_room, disconnect
 from datetime import datetime
 import json
 import re
@@ -7,6 +7,9 @@ from typing import Dict, Any, Optional
 import logging
 import asyncio
 import os
+import redis
+import jwt
+from functools import wraps
 from config import config
 from agents.query_classifier import QueryClassifierAgent
 from agents.job_search_agent import JobSearchAgent
@@ -25,15 +28,186 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 app.config.from_object(config[os.environ.get('FLASK_ENV', 'development')])
 
-# Initialize SocketIO with CORS support
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
+# Get configuration
+current_config = config[os.environ.get('FLASK_ENV', 'development')]
+
+# Initialize SocketIO with enhanced configuration
+socketio = SocketIO(
+    app, 
+    cors_allowed_origins="*", 
+    async_mode='threading',
+    connect_timeout=current_config.SOCKETIO_CONNECT_TIMEOUT,
+    transports=['websocket', 'polling']
+)
+
+# Redis connection for session management
+redis_client = None
+try:
+    redis_url = current_config.REDIS_URL
+    redis_ssl = current_config.REDIS_SSL
+    
+    # Configure Redis connection with SSL support for online services
+    if redis_ssl:
+        # For online Redis services with SSL
+        redis_client = redis.from_url(
+            redis_url,
+            decode_responses=True,
+            ssl=True,
+            ssl_cert_reqs=None,  # Don't verify SSL certificate
+            socket_connect_timeout=5,
+            socket_timeout=5,
+            retry_on_timeout=False,
+            health_check_interval=0  # Disable health check to avoid recursion
+        )
+    else:
+        # For local Redis or non-SSL connections
+        redis_client = redis.from_url(
+            redis_url,
+            decode_responses=True,
+            socket_connect_timeout=5,
+            socket_timeout=5,
+            retry_on_timeout=False,
+            health_check_interval=0  # Disable health check to avoid recursion
+        )
+    
+    # Test the connection
+    redis_client.ping()
+    logger.info("✅ Redis connected successfully")
+    
+except Exception as e:
+    logger.warning(f"⚠️ Redis not available: {str(e)}")
+    logger.info("🔄 Falling back to in-memory session storage")
+    redis_client = None
+
+# Global session tracking
+connected_users = {}  # socket_id -> user_id
+active_sessions = {}  # socket_id -> session_id
+user_sessions = {}    # user_id -> set of session_ids
+
+def ws_authenticate(socket, callback):
+    """WebSocket authentication middleware"""
+    try:
+        # Get token from query parameters or headers
+        token = request.args.get('token') or request.headers.get('Authorization', '').replace('Bearer ', '')
+        
+        if not token:
+            logger.warning(f"❌ No token provided for socket {socket.id}")
+            callback(Exception(current_config.ERROR_CODES['AUTH_FAILED']))
+            return
+        
+        # Verify JWT token
+        try:
+            # Use JWT secret from config
+            payload = jwt.decode(token, options={"verify_signature": False})
+            user_id = payload.get('id')
+            
+            if not user_id:
+                raise Exception("Invalid token payload")
+            
+            # Store user data in socket
+            socket.user_data = {
+                'id': user_id,
+                'email': payload.get('email'),
+                'token': token
+            }
+            
+            logger.info(f"✅ Authenticated user {user_id} for socket {socket.id}")
+            callback(None)
+            
+        except jwt.InvalidTokenError as e:
+            logger.error(f"❌ Invalid JWT token for socket {socket.id}: {str(e)}")
+            callback(Exception(current_config.ERROR_CODES['INVALID_TOKEN']))
+            
+    except Exception as e:
+        logger.error(f"❌ Authentication error for socket {socket.id}: {str(e)}")
+        callback(e)
+
+def get_user_id(socket):
+    """Get user ID from socket"""
+    return getattr(socket, 'user_data', {}).get('id')
+
+def store_user_session(user_id: str, socket_id: str):
+    """Store user session in Redis"""
+    if not redis_client:
+        return
+    
+    try:
+        # Store user session with expiration
+        redis_client.hset(f"user_sessions:{user_id}", "socketId", socket_id)
+        redis_client.hset(f"user_sessions:{user_id}", "connectedAt", datetime.now().isoformat())
+        redis_client.expire(f"user_sessions:{user_id}", current_config.SESSION_TIMEOUT_HOURS * 3600)
+        
+        # Store socket to user mapping
+        redis_client.set(f"socket_user:{socket_id}", user_id, current_config.SESSION_TIMEOUT_HOURS * 3600)
+        
+        logger.info(f"💾 Stored user session in Redis: {user_id} -> {socket_id}")
+    except Exception as e:
+        logger.error(f"❌ Failed to store user session in Redis: {str(e)}")
+
+def get_user_session_from_redis(user_id: str) -> Optional[str]:
+    """Get user session from Redis"""
+    if not redis_client:
+        return None
+    
+    try:
+        return redis_client.hget(f"user_sessions:{user_id}", "socketId")
+    except Exception as e:
+        logger.error(f"❌ Failed to get user session from Redis: {str(e)}")
+        return None
+
+def broadcast_to_user(user_id: str, event: str, data: dict):
+    """Broadcast message to all user's sockets"""
+    try:
+        # Try to get user's current socket from Redis
+        socket_id = get_user_session_from_redis(user_id)
+        if socket_id:
+            socketio.emit(event, data, room=socket_id)
+        else:
+            # Fallback to room-based broadcasting
+            socketio.emit(event, data, room=user_id)
+    except Exception as e:
+        logger.error(f"❌ Error broadcasting to user {user_id}: {str(e)}")
+
+def broadcast_typing_status(user_id: str, is_typing: bool):
+    """Broadcast typing status to all user's sockets"""
+    try:
+        logger.info(f"📝 Broadcasting typing status for user {user_id}: {is_typing}")
+        
+        broadcast_to_user(user_id, current_config.SOCKET_EVENTS['typing_status'], {
+            'isTyping': is_typing,
+            'timestamp': datetime.now().isoformat()
+        })
+    except Exception as e:
+        logger.error(f"❌ Error broadcasting typing status: {str(e)}")
+
+def handle_error(socket, error_type: str, error: Exception, session_id: str = None):
+    """Handle and emit errors"""
+    logger.error(f"❌ {error_type}: {str(error)}")
+    
+    error_message = str(error) if isinstance(error, Exception) else "An error occurred"
+    error_code = current_config.ERROR_CODES.get(error_type.upper(), error_type.upper())
+    
+    socket.emit(current_config.SOCKET_EVENTS['error'], {
+        'type': error_type,
+        'code': error_code,
+        'message': error_message,
+        'sessionId': session_id,
+        'timestamp': datetime.now().isoformat()
+    })
+    
+    # Also emit to specific error channel
+    socket.emit(error_type, {
+        'error': True,
+        'message': error_message,
+        'code': error_code
+    })
 
 class JobMatoChatBot:
     def __init__(self):
         # Initialize memory manager first
-        mongodb_uri = app.config.get('MONGODB_URI')
-        database_name = app.config.get('MONGODB_DATABASE', 'admin')
-        collection_name = app.config.get('MONGODB_COLLECTION', 'mato_chats')
+        mongodb_uri = current_config.MONGODB_URI
+        database_name = current_config.MONGODB_DATABASE
+        collection_name = current_config.MONGODB_COLLECTION
         
         if mongodb_uri:
             self.memory_manager = MemoryManager(mongodb_uri, database_name, collection_name)
@@ -119,7 +293,7 @@ class JobMatoChatBot:
             'body': original_data,
             'token': original_data.get('token', ''),
             'sessionId': original_data.get('sessionId', 'default'),
-            'baseUrl': original_data.get('baseUrl', 'https://backend-v1.jobmato.com')
+            'baseUrl': original_data.get('baseUrl', current_config.JOBMATO_API_BASE_URL)
         }
         
         return routing_data
@@ -131,7 +305,7 @@ class JobMatoChatBot:
             classification_response = await self.query_classifier.classify_query(
                 data.get('chatInput', ''), 
                 data.get('token', ''),
-                data.get('baseUrl', 'https://backend-v1.jobmato.com')
+                data.get('baseUrl', current_config.JOBMATO_API_BASE_URL)
             )
             
             # Step 2: Parse classification
@@ -161,7 +335,7 @@ class JobMatoChatBot:
         except Exception as e:
             logger.error(f"Error processing message: {str(e)}")
             return {
-                'type': 'plain_text',
+                'type': current_config.RESPONSE_TYPES['plain_text'],
                 'content': 'I apologize, but I encountered an error processing your request. Please try again.',
                 'metadata': {
                     'error': str(e),
@@ -172,126 +346,471 @@ class JobMatoChatBot:
 # Initialize the chatbot
 chatbot = JobMatoChatBot()
 
-# WebSocket event handlers
-@socketio.on('connect')
+# WebSocket event handlers with enhanced functionality
+@socketio.on(current_config.SOCKET_EVENTS['connect'])
 def handle_connect():
-    """Handle client connection"""
+    """Handle client connection with authentication"""
     logger.info(f"👤 Client connected: {request.sid}")
-    emit('connected', {'status': 'connected', 'session_id': request.sid})
+    
+    # Authenticate the connection
+    ws_authenticate(request, lambda err: handle_auth_result(request, err))
 
-@socketio.on('disconnect')
+def handle_auth_result(socket, error):
+    """Handle authentication result"""
+    if error:
+        logger.error(f"❌ Authentication failed for socket {socket.id}: {str(error)}")
+        socket.emit('auth_error', {
+            'message': str(error),
+            'code': current_config.ERROR_CODES['AUTH_FAILED']
+        })
+        # Disconnect unauthenticated socket after delay
+        socketio.start_background_task(lambda: disconnect_unauthorized(socket))
+    else:
+        user_id = get_user_id(socket)
+        if user_id:
+            # Store user session
+            store_user_session(user_id, socket.id)
+            
+            # Update global mappings
+            connected_users[socket.id] = user_id
+            
+            socket.emit(current_config.SOCKET_EVENTS['auth_status'], {
+                'authenticated': True,
+                'userId': user_id,
+                'socketId': socket.id
+            })
+            
+            # Notify about available agents
+            socket.emit('available_agents', {
+                'availableAgents': list(current_config.AGENT_TYPES.keys()),
+                'message': 'These agent types are available for your queries'
+            })
+            
+            logger.info(f"✅ User {user_id} authenticated successfully")
+        else:
+            logger.error(f"❌ No user ID found for authenticated socket {socket.id}")
+
+def disconnect_unauthorized(socket):
+    """Disconnect unauthorized socket after delay"""
+    import time
+    time.sleep(5)
+    if not get_user_id(socket):
+        socket.disconnect(True)
+
+@socketio.on(current_config.SOCKET_EVENTS['disconnect'])
 def handle_disconnect():
-    """Handle client disconnection"""
-    logger.info(f"👋 Client disconnected: {request.sid}")
+    """Handle client disconnection with cleanup"""
+    user_id = get_user_id(request)
+    session_id = active_sessions.get(request.sid)
+    
+    logger.info(f"👋 Client disconnected: {request.sid}", {
+        'userId': user_id,
+        'sessionId': session_id
+    })
+    
+    # Clean up Redis data
+    if user_id and redis_client:
+        try:
+            redis_client.hdel(f"user_sessions:{user_id}", "socketId")
+            redis_client.delete(f"socket_user:{request.sid}")
+            logger.info(f"🧹 Cleaned up Redis session data for user: {user_id}")
+        except Exception as e:
+            logger.error(f"❌ Failed to clean up Redis session data: {str(e)}")
+    
+    # Clean up local mappings
+    connected_users.pop(request.sid, None)
+    active_sessions.pop(request.sid, None)
+
+@socketio.on(current_config.SOCKET_EVENTS['init_chat'])
+def handle_init_chat(data):
+    """Initialize a new chat session or load existing with enhanced error handling"""
+    try:
+        user_id = get_user_id(request)
+        if not user_id:
+            raise Exception("User not authenticated")
+        
+        logger.info(f"🔄 Initializing chat for user {user_id}", data)
+        
+        session_id = data.get('sessionId') if data else None
+        
+        if session_id:
+            # Validate session ID format
+            if not isinstance(session_id, str) or not session_id.strip():
+                raise Exception("Invalid session ID format")
+            
+            # Check Redis for session validation
+            if redis_client:
+                try:
+                    cached_session = redis_client.get(f"chat_session:{session_id}")
+                    if cached_session:
+                        session_data = json.loads(cached_session)
+                        if session_data.get('userId') != user_id:
+                            raise Exception("Invalid session ID")
+                except Exception as redis_error:
+                    logger.warn(f"⚠️ Redis session check failed: {str(redis_error)}")
+        else:
+            # Create new session
+            session_id = f"session_{user_id}_{int(datetime.now().timestamp())}"
+            
+            # Cache session in Redis
+            if redis_client:
+                try:
+                    session_data = {
+                        'userId': user_id,
+                        'sessionId': session_id,
+                        'createdAt': datetime.now().isoformat()
+                    }
+                    redis_client.setex(f"chat_session:{session_id}", current_config.SESSION_TIMEOUT_HOURS * 3600, json.dumps(session_data))
+                except Exception as redis_error:
+                    logger.warn(f"⚠️ Failed to cache session in Redis: {str(redis_error)}")
+            
+            # Add to user sessions
+            if user_id not in user_sessions:
+                user_sessions[user_id] = set()
+            user_sessions[user_id].add(session_id)
+        
+        # Update socket mappings
+        active_sessions[request.sid] = session_id
+        join_room(user_id)
+        
+        logger.info(f"✅ Session {session_id} initialized for user {user_id}")
+        
+        # Send success response
+        response = {
+            'connected': True,
+            'sessionId': session_id,
+            'userId': user_id,
+            'timestamp': datetime.now().isoformat()
+        }
+        
+        request.emit(current_config.SOCKET_EVENTS['session_status'], response)
+        request.emit('init_response', response)
+        
+        # Send welcome message
+        try:
+            welcome_data = {
+                'chatInput': 'Hello',
+                'sessionId': session_id,
+                'token': getattr(request, 'user_data', {}).get('token', ''),
+                'baseUrl': current_config.JOBMATO_API_BASE_URL
+            }
+            welcome_response = asyncio.run(chatbot.process_message(welcome_data))
+            if welcome_response:
+                handle_agent_response(request, welcome_response)
+        except Exception as welcome_error:
+            logger.warn(f"⚠️ Failed to send welcome message: {str(welcome_error)}")
+        
+    except Exception as e:
+        logger.error(f"❌ Init chat error: {str(e)}")
+        error_response = {
+            'connected': False,
+            'error': str(e) if isinstance(e, Exception) else "Failed to initialize chat",
+            'timestamp': datetime.now().isoformat()
+        }
+        
+        request.emit(current_config.SOCKET_EVENTS['session_status'], error_response)
+        handle_error(request, 'init_error', e)
+
+@socketio.on(current_config.SOCKET_EVENTS['send_message'])
+def handle_send_message(data):
+    """Handle incoming chat messages with enhanced error handling and recovery"""
+    try:
+        user_id = get_user_id(request)
+        session_id = active_sessions.get(request.sid)
+        
+        logger.info(f"💬 Processing message: '{data.get('message', '')}' for session {session_id}, user {user_id}")
+        
+        if not user_id or not session_id:
+            # Try to recover the session
+            if user_id:
+                # Try Redis recovery
+                if redis_client:
+                    redis_session_id = redis_client.get(f"last_session:{user_id}")
+                    if redis_session_id:
+                        logger.info(f"🔄 Attempting session recovery from Redis: {redis_session_id}")
+                        handle_init_chat({'sessionId': redis_session_id})
+                        # Retry sending message after session recovery
+                        if data.get('message'):
+                            socketio.start_background_task(lambda: retry_send_message(request, data))
+                        return
+                
+                # Try local recovery
+                user_session_set = user_sessions.get(user_id, set())
+                if user_session_set:
+                    last_session = list(user_session_set)[-1]
+                    logger.info(f"🔄 Attempting session recovery: {last_session}")
+                    handle_init_chat({'sessionId': last_session})
+                    # Retry sending message after session recovery
+                    if data.get('message'):
+                        socketio.start_background_task(lambda: retry_send_message(request, data))
+            return
+        
+            raise Exception("Session not initialized. Please initialize chat first.")
+        
+        message = data.get('message', '')
+        if not message or not isinstance(message, str):
+            raise Exception("Invalid message format")
+        
+        # Check message length
+        if len(message) > current_config.MAX_MESSAGE_LENGTH:
+            raise Exception(f"Message too long. Maximum length is {current_config.MAX_MESSAGE_LENGTH} characters.")
+        
+        # Store last active session in Redis
+        if redis_client:
+            redis_client.setex(f"last_session:{user_id}", current_config.SESSION_TIMEOUT_HOURS * 3600, session_id)
+        
+        # Don't emit typing for very short follow-up queries
+        is_short_query = len(message) <= 15
+        if not is_short_query:
+            broadcast_typing_status(user_id, True)
+        
+        logger.info(f"🤖 Calling chatbot service for session {session_id}")
+        
+        # Process message
+        request_data = {
+            'chatInput': message,
+            'sessionId': session_id,
+            'token': getattr(request, 'user_data', {}).get('token', ''),
+            'baseUrl': current_config.JOBMATO_API_BASE_URL
+        }
+        
+        response = asyncio.run(chatbot.process_message(request_data))
+        
+        # Always stop typing indicator
+        broadcast_typing_status(user_id, False)
+        
+        if not response:
+            raise Exception("No response received from chatbot")
+        
+        if not response.get('content'):
+            raise Exception("Empty response content received from chatbot")
+        
+        # Cache response for potential replay
+        if redis_client:
+            try:
+                redis_client.setex(f"last_response:{session_id}", 3600, json.dumps(response))
+            except Exception as e:
+                logger.warn(f"⚠️ Failed to cache response: {str(e)}")
+        
+        # Route based on response type
+        if response.get('type') == 'career_advice':
+            handle_career_response(request, response)
+        else:
+            handle_agent_response(request, response)
+        
+        # Update session activity
+        active_sessions[request.sid] = session_id
+        
+    except Exception as e:
+        logger.error(f"❌ Error in handle_send_message: {str(e)}")
+        
+        # Always stop typing indicator on error
+        user_id = get_user_id(request)
+        if user_id:
+            broadcast_typing_status(user_id, False)
+        
+        # Send user-friendly error message
+        request.emit(current_config.SOCKET_EVENTS['receive_message'], {
+            'content': "I'm sorry, I encountered an issue processing your request. Please try again or start a new session if the problem persists.",
+            'type': current_config.RESPONSE_TYPES['plain_text'],
+            'metadata': {
+                'error': True,
+                'errorType': 'processing_error'
+            }
+        })
+
+def retry_send_message(socket, data):
+    """Retry sending message after session recovery"""
+    import time
+    time.sleep(0.5)
+    handle_send_message(data)
+
+@socketio.on(current_config.SOCKET_EVENTS['typing_status'])
+def handle_typing_status(data):
+    """Handle typing status with broadcasting to all user sockets"""
+    try:
+        user_id = get_user_id(request)
+        if user_id:
+            is_typing = data.get('isTyping', False)
+            broadcast_typing_status(user_id, is_typing)
+    except Exception as e:
+        logger.error(f"❌ Error handling typing status: {str(e)}")
+
+@socketio.on('get_chat_history')
+def handle_get_chat_history():
+    """Handle request for chat history"""
+    try:
+        session_id = active_sessions.get(request.sid)
+        if not session_id:
+            raise Exception("No active session")
+        
+        history = asyncio.run(chatbot.memory_manager.get_conversation_history(session_id))
+        request.emit(current_config.SOCKET_EVENTS['chat_history'], {'messages': history})
+    except Exception as e:
+        handle_error(request, 'history_error', e)
+
+@socketio.on(current_config.SOCKET_EVENTS['ping'])
+def handle_ping():
+    """Connection health check"""
+    try:
+        request.emit(current_config.SOCKET_EVENTS['pong'])
+        logger.debug(f"🏓 Ping-pong with client: {request.sid}")
+    except Exception as e:
+        logger.error(f"❌ Error handling ping: {str(e)}")
+
+def handle_career_response(socket, response):
+    """Handle career advice responses"""
+    if not response or not response.get('content'):
+        handle_error(socket, 'response_error', Exception("Invalid career response"))
+        return
+    
+    logger.info("🎯 Processing career response:", {
+        'type': response.get('type'),
+        'hasContent': bool(response.get('content')),
+        'metadata': response.get('metadata')
+    })
+    
+    # Format career suggestions if available
+    suggestions = response.get('metadata', {}).get('suggestions', [])
+    formatted_response = format_career_suggestions(suggestions) if suggestions else response.get('content')
+    
+    socket.emit(current_config.SOCKET_EVENTS['receive_message'], {
+        'content': formatted_response,
+        'type': 'career_advice',
+        'metadata': response.get('metadata', {})
+    })
+
+def handle_agent_response(socket, response):
+    """Handle agent responses with enhanced job card support"""
+    if not response or not response.get('content'):
+        handle_error(socket, 'response_error', Exception("Invalid response from agent"))
+        return
+    
+    content = response.get('content')
+    response_type = response.get('type', 'plain_text')
+    metadata = response.get('metadata', {})
+    
+    # Enhanced job card handling
+    if response_type == 'job_card' and metadata.get('jobs'):
+        session_id = active_sessions.get(socket.id)
+        if session_id and redis_client:
+            try:
+                # Cache jobs and metadata for session replay
+                redis_client.setex(f"job_agent:jobs:{session_id}", 3600, json.dumps(metadata.get('jobs')))
+                redis_client.setex(f"job_agent:metadata:{session_id}", 3600, json.dumps(metadata))
+            except Exception as e:
+                logger.warn(f"⚠️ Failed to cache job data: {str(e)}")
+    
+    # Always emit through receive_message with consistent format
+    socket.emit(current_config.SOCKET_EVENTS['receive_message'], {
+        'content': content,
+        'type': response_type,
+        'metadata': {
+            **metadata,
+            # For job cards, ensure jobs array is always present
+            **({'jobs': metadata.get('jobs', []), 'totalJobs': metadata.get('totalJobs', len(metadata.get('jobs', [])))} if response_type == 'job_card' else {})
+        }
+    })
+
+def format_career_suggestions(suggestions):
+    """Format career suggestions for display"""
+    if not suggestions:
+        return "I don't have any specific career suggestions at the moment."
+    
+    formatted = "Here are some career suggestions for you:\n\n"
+    for i, suggestion in enumerate(suggestions[:5], 1):  # Limit to 5 suggestions
+        formatted += f"{i}. {suggestion}\n"
+    
+    return formatted
+
+def broadcast_resume_upload_success(user_id: str):
+    """Broadcast resume upload success message to user"""
+    try:
+        message = {
+            'content': """🎉 **Resume uploaded successfully!** 
+
+Your resume has been processed and is now ready for analysis. Here's what you can do now:
+
+## 📋 Available Resume Analysis Options:
+
+### 🔍 **General Analysis**
+- Ask: *"Analyze my resume"* or *"Give me feedback on my resume"*
+- Get comprehensive feedback on content, structure, and improvements
+
+### 🎯 **ATS Optimization** 
+- Ask: *"Make my resume ATS-friendly"* or *"ATS optimization"*
+- Get specific tips to pass Applicant Tracking Systems
+
+### 💼 **Job-Specific Analysis**
+- Ask: *"How does my resume match [job title]?"*
+- Get targeted feedback for specific roles
+
+### 🚀 **Skills Analysis**
+- Ask: *"What skills should I add?"* or *"Skill gap analysis"*
+- Identify missing skills for your career goals
+
+### 📈 **Industry Insights**
+- Ask: *"Industry trends for my field"*
+- Get market insights and recommendations
+
+**Ready to get started?** Just type any of the questions above, or ask me anything specific about your resume!""",
+            'type': 'resume_upload_success',
+            'metadata': {
+                'uploadSuccess': True,
+                'availableOptions': [
+                    'General Resume Analysis',
+                    'ATS Optimization',
+                    'Job-Specific Analysis',
+                    'Skills Gap Analysis',
+                    'Industry Insights'
+                ],
+                'nextSteps': [
+                    'Ask for general analysis',
+                    'Request ATS optimization',
+                    'Compare with specific job',
+                    'Analyze skill gaps',
+                    'Get industry insights'
+                ]
+            }
+        }
+        
+        broadcast_to_user(user_id, current_config.SOCKET_EVENTS['receive_message'], message)
+        logger.info(f"📤 Sent resume upload success message to user: {user_id}")
+    except Exception as e:
+        logger.error(f"❌ Error broadcasting resume upload success: {str(e)}")
+
+# Legacy event handlers for backward compatibility
+@socketio.on('chat_message')
+def handle_chat_message_legacy(data):
+    """Legacy chat message handler for backward compatibility"""
+    # Convert to new format
+    new_data = {
+        'message': data.get('message', ''),
+        'sessionId': data.get('session_id', request.sid),
+        'token': data.get('token', ''),
+        'baseUrl': data.get('baseUrl', 'https://backend-v1.jobmato.com')
+    }
+    handle_send_message(new_data)
 
 @socketio.on('join_session')
 def handle_join_session(data):
-    """Handle joining a chat session"""
+    """Legacy session join handler"""
     session_id = data.get('session_id', request.sid)
     join_room(session_id)
     logger.info(f"🏠 Client {request.sid} joined session: {session_id}")
-    emit('session_joined', {'session_id': session_id}, room=session_id)
+    request.emit('session_joined', {'session_id': session_id}, room=session_id)
 
 @socketio.on('leave_session')
 def handle_leave_session(data):
-    """Handle leaving a chat session"""
+    """Legacy session leave handler"""
     session_id = data.get('session_id', request.sid)
     leave_room(session_id)
     logger.info(f"🚪 Client {request.sid} left session: {session_id}")
 
-@socketio.on('chat_message')
-def handle_chat_message(data):
-    """Handle incoming chat messages via WebSocket"""
-    try:
-        logger.info(f"💬 Received WebSocket message: {data}")
-        
-        # Extract message data
-        session_id = data.get('session_id', request.sid)
-        user_message = data.get('message', '')
-        token = data.get('token', '')
-        base_url = data.get('baseUrl', 'https://backend-v1.jobmato.com')
-        
-        if not user_message.strip():
-            emit('error', {'message': 'Empty message received'}, room=session_id)
-            return
-        
-        # Join session room if not already joined
-        join_room(session_id)
-        
-        # Emit typing indicator
-        emit('typing_start', {}, room=session_id)
-        
-        # Prepare request data
-        request_data = {
-            'chatInput': user_message,
-            'sessionId': session_id,
-            'token': token,
-            'baseUrl': base_url
-        }
-        
-        # Process message asynchronously
-        def process_async():
-            try:
-                response = asyncio.run(chatbot.process_message(request_data))
-                
-                # Stop typing indicator
-                socketio.emit('typing_stop', {}, room=session_id)
-                
-                # Send response
-                socketio.emit('chat_response', {
-                    'response': response,
-                    'session_id': session_id,
-                    'timestamp': datetime.now().isoformat()
-                }, room=session_id)
-                
-                logger.info(f"✅ Response sent to session: {session_id}")
-                
-            except Exception as e:
-                logger.error(f"❌ Error processing WebSocket message: {str(e)}")
-                socketio.emit('typing_stop', {}, room=session_id)
-                socketio.emit('error', {
-                    'message': 'Sorry, I encountered an error processing your message.',
-                    'error': str(e),
-                    'timestamp': datetime.now().isoformat()
-                }, room=session_id)
-        
-        # Run in background thread
-        socketio.start_background_task(process_async)
-        
-    except Exception as e:
-        logger.error(f"❌ WebSocket error: {str(e)}")
-        emit('error', {'message': 'An unexpected error occurred', 'error': str(e)})
-
 @socketio.on('get_session_history')
-def handle_get_session_history(data):
-    """Handle request for session history"""
-    try:
-        session_id = data.get('session_id', request.sid)
-        limit = data.get('limit', 10)
-        
-        def get_history_async():
-            try:
-                history = asyncio.run(chatbot.memory_manager.get_conversation_history(session_id))
-                session_info = asyncio.run(chatbot.memory_manager.get_session_info(session_id))
-                
-                socketio.emit('session_history', {
-                    'history': history,
-                    'session_info': session_info,
-                    'session_id': session_id
-                }, room=session_id)
-                
-            except Exception as e:
-                logger.error(f"❌ Error getting session history: {str(e)}")
-                socketio.emit('error', {
-                    'message': 'Error retrieving session history',
-                    'error': str(e)
-                }, room=session_id)
-        
-        socketio.start_background_task(get_history_async)
-        
-    except Exception as e:
-        logger.error(f"❌ Error handling history request: {str(e)}")
-        emit('error', {'message': 'Error processing history request', 'error': str(e)})
+def handle_get_session_history_legacy(data):
+    """Legacy session history handler"""
+    handle_get_chat_history()
 
 @socketio.on('clear_session')
 def handle_clear_session(data):
@@ -304,19 +823,19 @@ def handle_clear_session(data):
                 success = asyncio.run(chatbot.memory_manager.clear_session(session_id))
                 
                 if success:
-                    socketio.emit('session_cleared', {
+                    socketio.emit(current_config.SOCKET_EVENTS['session_cleared'], {
                         'message': 'Session history cleared successfully',
                         'session_id': session_id
                     }, room=session_id)
                 else:
-                    socketio.emit('error', {
+                    socketio.emit(current_config.SOCKET_EVENTS['error'], {
                         'message': 'Failed to clear session history',
                         'session_id': session_id
                     }, room=session_id)
                 
             except Exception as e:
                 logger.error(f"❌ Error clearing session: {str(e)}")
-                socketio.emit('error', {
+                socketio.emit(current_config.SOCKET_EVENTS['error'], {
                     'message': 'Error clearing session',
                     'error': str(e)
                 }, room=session_id)
@@ -325,7 +844,7 @@ def handle_clear_session(data):
         
     except Exception as e:
         logger.error(f"❌ Error handling clear session: {str(e)}")
-        emit('error', {'message': 'Error processing clear request', 'error': str(e)})
+        request.emit(current_config.SOCKET_EVENTS['error'], {'message': 'Error processing clear request', 'error': str(e)})
 
 @app.route('/')
 def index():
@@ -348,7 +867,7 @@ def main_webhook():
     except Exception as e:
         logger.error(f"Error in main webhook: {str(e)}")
         return jsonify({
-            'type': 'plain_text',
+            'type': current_config.RESPONSE_TYPES['plain_text'],
             'content': 'Sorry, I encountered an error. Please try again.',
             'metadata': {
                 'error': str(e),
@@ -363,7 +882,7 @@ def resume_upload_webhook():
         # Handle file upload
         if 'resume' not in request.files:
             return jsonify({
-                'type': 'plain_text',
+                'type': current_config.RESPONSE_TYPES['plain_text'],
                 'content': 'No resume file provided. Please upload a PDF file.',
                 'metadata': {
                     'uploadSuccess': False,
@@ -374,7 +893,7 @@ def resume_upload_webhook():
         
         file = request.files['resume']
         token = request.form.get('token', '')
-        base_url = request.form.get('baseUrl', 'https://backend-v1.jobmato.com')
+        base_url = request.form.get('baseUrl', current_config.JOBMATO_API_BASE_URL)
         
         # Forward to resume upload API
         import requests
@@ -389,8 +908,19 @@ def resume_upload_webhook():
         
         if upload_response.status_code == 200:
             upload_result = upload_response.json()
+            
+            # Extract user ID from token for broadcasting
+            try:
+                payload = jwt.decode(token, options={"verify_signature": False})
+                user_id = payload.get('id')
+                if user_id:
+                    # Broadcast resume upload success
+                    broadcast_resume_upload_success(user_id)
+            except Exception as e:
+                logger.warning(f"⚠️ Could not extract user ID for broadcasting: {str(e)}")
+            
             return jsonify({
-                'type': 'plain_text',
+                'type': current_config.RESPONSE_TYPES['plain_text'],
                 'content': 'Resume uploaded successfully! I can now provide detailed analysis and personalized job recommendations based on your resume.',
                 'metadata': {
                     'uploadSuccess': True,
@@ -405,7 +935,7 @@ def resume_upload_webhook():
             })
         else:
             return jsonify({
-                'type': 'plain_text',
+                'type': current_config.RESPONSE_TYPES['plain_text'],
                 'content': 'Resume upload failed. Please ensure you\'re uploading a valid PDF file and try again.',
                 'metadata': {
                     'uploadSuccess': False,
@@ -417,7 +947,7 @@ def resume_upload_webhook():
     except Exception as e:
         logger.error(f"Error in resume upload: {str(e)}")
         return jsonify({
-            'type': 'plain_text',
+            'type': current_config.RESPONSE_TYPES['plain_text'],
             'content': 'Resume upload failed due to an unexpected error. Please try again.',
             'metadata': {
                 'uploadSuccess': False,
@@ -449,23 +979,22 @@ def upload_resume_ui():
         session_id = request.form.get('session_id', 'default')
         
         # Validate file type
-        allowed_extensions = {'.pdf', '.doc', '.docx'}
         file_ext = os.path.splitext(file.filename)[1].lower()
-        if file_ext not in allowed_extensions:
+        if file_ext not in current_config.ALLOWED_EXTENSIONS:
             return jsonify({
                 'success': False,
-                'error': 'Only PDF and Word documents are allowed'
+                'error': f'Only {", ".join(current_config.ALLOWED_EXTENSIONS)} files are allowed'
             }), 400
         
-        # Validate file size (10MB limit)
+        # Validate file size
         file.seek(0, 2)  # Seek to end
         file_size = file.tell()
         file.seek(0)  # Reset to beginning
         
-        if file_size > 10 * 1024 * 1024:  # 10MB
+        if file_size > current_config.MAX_FILE_SIZE:
             return jsonify({
                 'success': False,
-                'error': 'File size must be less than 10MB'
+                'error': f'File size must be less than {current_config.MAX_FILE_SIZE // (1024*1024)}MB'
             }), 400
         
         logger.info(f"📤 Uploading resume: {file.filename} ({file_size} bytes) for session: {session_id}")
@@ -505,6 +1034,16 @@ def upload_resume_ui():
                     except Exception as e:
                         logger.warning(f"⚠️ Could not store upload event in memory: {str(e)}")
                 
+                # Extract user ID from token for broadcasting
+                try:
+                    payload = jwt.decode(token, options={"verify_signature": False})
+                    user_id = payload.get('id')
+                    if user_id:
+                        # Broadcast resume upload success
+                        broadcast_resume_upload_success(user_id)
+                except Exception as e:
+                    logger.warning(f"⚠️ Could not extract user ID for broadcasting: {str(e)}")
+                
                 return jsonify({
                     'success': True,
                     'message': 'Resume uploaded successfully!',
@@ -533,88 +1072,12 @@ def upload_resume_ui():
             'error': 'An unexpected error occurred during upload'
         }), 500
 
-@socketio.on('init_chat')
-def handle_init_chat(data):
-    """Initialize a new chat session or load existing"""
-    try:
-        session_id = data.get('sessionId', request.sid)
-        user_id = data.get('userId', 'anonymous')
-        token = data.get('token', '')
-        
-        # Join the session room
-        join_room(session_id)
-        
-        # Check authentication if token provided
-        authenticated = False
-        if token:
-            # Here you would validate the token
-            # For now, we'll assume any non-empty token is valid
-            authenticated = bool(token)
-        
-        # Emit authentication status
-        emit('auth_status', {
-            'authenticated': authenticated,
-            'userId': user_id if authenticated else None,
-            'socketId': request.sid
-        })
-        
-        # Emit session status
-        emit('session_status', {
-            'connected': True,
-            'sessionId': session_id,
-            'userId': user_id if authenticated else 'anonymous',
-            'timestamp': datetime.now().isoformat()
-        })
-        
-        # Emit initialization response
-        emit('init_response', {
-            'connected': True,
-            'sessionId': session_id,
-            'userId': user_id if authenticated else 'anonymous',
-            'timestamp': datetime.now().isoformat()
-        })
-        
-        logger.info(f"🔄 Chat session initialized: {session_id} for user: {user_id}")
-        
-        # Get available agents
-        emit('available_agents', {
-            'availableAgents': ['job_search', 'resume', 'career_advice', 'project', 'general'],
-            'message': 'These agent types are available for your queries'
-        })
-        
-    except Exception as e:
-        logger.error(f"❌ Error initializing chat: {str(e)}")
-        emit('error', {
-            'error': 'Failed to initialize chat session',
-            'type': 'session_error'
-        })
-
-@socketio.on('typing_status')
-def handle_typing_status(data):
-    """Broadcast typing status to room"""
-    try:
-        is_typing = data.get('isTyping', False)
-        session_id = data.get('sessionId', request.sid)
-        
-        # Broadcast typing status to the room
-        emit('typing_status', {
-            'isTyping': is_typing
-        }, room=session_id)
-        
-    except Exception as e:
-        logger.error(f"❌ Error handling typing status: {str(e)}")
-
-@socketio.on('ping')
-def handle_ping():
-    """Connection health check"""
-    try:
-        emit('pong')
-        logger.debug(f"🏓 Ping-pong with client: {request.sid}")
-    except Exception as e:
-        logger.error(f"❌ Error handling ping: {str(e)}")
-
 if __name__ == '__main__':
     # Use SocketIO's run method instead of Flask's run method
-    # Port 5001 to avoid conflicts with macOS AirPlay Receiver on port 5000
-    port = int(os.environ.get('PORT', 5002))
-    socketio.run(app, debug=True, host='0.0.0.0', port=port)
+    # Use configuration for port and host
+    socketio.run(
+        app, 
+        debug=current_config.DEBUG, 
+        host=current_config.HOST, 
+        port=current_config.PORT
+    )
