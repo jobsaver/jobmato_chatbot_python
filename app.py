@@ -490,20 +490,7 @@ def handle_send_message(data):
                         # Retry sending message after session recovery
                         if data.get('message'):
                             socketio.start_background_task(lambda: retry_send_message(request, data))
-                        return
-                
-                # Try local recovery
-                user_session_set = user_sessions.get(user_id, set())
-                if user_session_set:
-                    last_session = list(user_session_set)[-1]
-                    logger.info(f"🔄 Attempting session recovery: {last_session}")
-                    handle_init_chat({'sessionId': last_session})
-                    # Retry sending message after session recovery
-                    if data.get('message'):
-                        socketio.start_background_task(lambda: retry_send_message(request, data))
-                    return
-            
-            raise Exception("Session not initialized. Please initialize chat first.")
+            return
         
         message = data.get('message', '')
         if not message or not isinstance(message, str):

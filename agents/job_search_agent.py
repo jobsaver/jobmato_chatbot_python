@@ -38,7 +38,7 @@ class JobSearchAgent(BaseAgent):
         """
             
     async def search_jobs(self, routing_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Search for jobs based on the routing data"""
+        """Search for jobs using JobMato Tools with enhanced fallback logic"""
         try:
             token = routing_data.get('token', '')
             base_url = routing_data.get('baseUrl', self.base_url)
@@ -46,20 +46,11 @@ class JobSearchAgent(BaseAgent):
             original_query = routing_data.get('originalQuery', '')
             extracted_data = routing_data.get('extractedData', {})
             
-            logger.info(f"🔍 Job search with token: {token[:50] if token else 'None'}...")
-            logger.info(f"🌐 Using base URL: {base_url}")
+            # Build comprehensive search parameters
+            search_params = self._build_search_params(extracted_data, {}, {})
             
-            # Get conversation context
-            conversation_context = await self.get_conversation_context(session_id)
-            
-            # Get user profile and resume data for better job matching
-            profile_data = await self.get_profile_data(token, base_url)
-            resume_data = await self.get_resume_data(token, base_url)
-            
-            # Build search parameters from extracted data and user context
-            search_params = self._build_search_params(extracted_data, profile_data, resume_data)
-            
-            # Search for jobs using the JobMato API
+            # First attempt with original parameters
+            logger.info(f"🔍 First attempt search params: {search_params}")
             job_search_result = await self.search_jobs_tool(token, base_url, **search_params)
             
             if not job_search_result.get('success'):
@@ -68,8 +59,28 @@ class JobSearchAgent(BaseAgent):
             jobs_data = job_search_result.get('data', {})
             jobs = jobs_data.get('jobs', [])
             
+            # If no jobs found, try with broader filters
             if not jobs:
-                return self._handle_no_jobs_found(original_query, search_params, extracted_data.get('language', 'english'))
+                logger.info("🔄 No jobs found, trying with broader filters...")
+                broader_params = self._build_broader_search_params(extracted_data, search_params)
+                logger.info(f"🔍 Broader search params: {broader_params}")
+                
+                broader_result = await self.search_jobs_tool(token, base_url, **broader_params)
+                
+                if broader_result.get('success'):
+                    jobs_data = broader_result.get('data', {})
+                    jobs = jobs_data.get('jobs', [])
+                    
+                    if jobs:
+                        logger.info(f"✅ Found {len(jobs)} jobs with broader filters")
+                        # Use broader params for the rest of the processing
+                        search_params = broader_params
+                    else:
+                        logger.info("❌ No jobs found even with broader filters")
+                        return self._handle_no_jobs_found(original_query, search_params, extracted_data.get('language', 'english'))
+                else:
+                    logger.info("❌ Broader search also failed")
+                    return self._handle_search_failure(original_query, extracted_data.get('language', 'english'))
             
             # Format jobs for response (don't send raw data to AI)
             formatted_jobs = []
@@ -117,23 +128,50 @@ class JobSearchAgent(BaseAgent):
     
     def format_job_for_response(self, job: Dict[str, Any]) -> Dict[str, Any]:
         """Format job data for response following the specified structure"""
+        
+        def safe_get_string(value, default=""):
+            """Safely extract string value from potentially complex objects"""
+            if isinstance(value, str):
+                return value
+            elif isinstance(value, dict):
+                # Try to get name or title from object
+                return value.get('name', value.get('title', value.get('display_name', default)))
+            elif isinstance(value, list):
+                # Join list items
+                return ', '.join([safe_get_string(item) for item in value])
+            elif value is None:
+                return default
+            else:
+                return str(value)
+        
+        def safe_get_list(value, default=None):
+            """Safely extract list value"""
+            if isinstance(value, list):
+                return value
+            elif isinstance(value, str):
+                return [value]
+            elif value is None:
+                return default or []
+            else:
+                return [str(value)]
+        
         return {
             '_id': job.get('_id'),
             'job_id': job.get('job_id'),
-            'job_title': job.get('job_title'),
-            'company': job.get('company'),
-            'locations': job.get('locations'),
-            'location': job.get('locations', [])[0] if job.get('locations') else job.get('location'),
-            'experience': job.get('experience'),
-            'salary': job.get('salary'),
-            'skills': job.get('skills'),
-            'work_mode': job.get('work_mode'),
-            'job_type': job.get('job_type'),
-            'description': job.get('description'),
-            'posted_date': job.get('posted_date'),
-            'source_url': job.get('source_url'),
-            'apply_url': job.get('apply_url'),
-            'source_platform': job.get('source_platform'),
+            'job_title': safe_get_string(job.get('job_title'), 'Job Title'),
+            'company': safe_get_string(job.get('company'), 'Company'),
+            'locations': safe_get_list(job.get('locations')),
+            'location': safe_get_string(job.get('locations', [])[0] if job.get('locations') else job.get('location'), 'Location'),
+            'experience': safe_get_string(job.get('experience'), 'Experience'),
+            'salary': safe_get_string(job.get('salary'), 'Salary'),
+            'skills': safe_get_list(job.get('skills')),
+            'work_mode': safe_get_string(job.get('work_mode'), 'Work Mode'),
+            'job_type': safe_get_string(job.get('job_type'), 'Job Type'),
+            'description': safe_get_string(job.get('description'), 'Description'),
+            'posted_date': safe_get_string(job.get('posted_date'), 'Posted Date'),
+            'source_url': safe_get_string(job.get('source_url'), ''),
+            'apply_url': safe_get_string(job.get('apply_url'), ''),
+            'source_platform': safe_get_string(job.get('source_platform'), ''),
         }
     
     def _handle_search_failure(self, original_query: str, language: str = 'english') -> Dict[str, Any]:
@@ -150,11 +188,31 @@ class JobSearchAgent(BaseAgent):
         }
     
     def _handle_no_jobs_found(self, original_query: str, search_params: Dict[str, Any], language: str = 'english') -> Dict[str, Any]:
-        """Handle case when no jobs are found"""
+        """Handle case when no jobs are found even after broader search"""
         if language in ['hindi', 'hinglish']:
-            content = f"'{original_query}' ke liye koi jobs nahi mili. Try using different keywords, removing specific requirements, or searching for broader terms like 'developer' or 'engineer'."
+            content = f"'{original_query}' ke liye koi jobs nahi mili, even after trying broader filters. Try these suggestions:\n\n"
+            content += "🔍 **Search Tips:**\n"
+            content += "• Use simpler keywords like 'developer' instead of 'React developer'\n"
+            content += "• Remove location restrictions\n"
+            content += "• Try different job titles\n"
+            content += "• Check spelling of keywords\n\n"
+            content += "💡 **Alternative Searches:**\n"
+            content += "• 'software developer jobs'\n"
+            content += "• 'IT jobs'\n"
+            content += "• 'tech jobs'\n"
+            content += "• 'remote jobs'"
         else:
-            content = f"No jobs found for '{original_query}'. Try using different keywords, removing specific requirements, or searching for broader terms like 'developer' or 'engineer'."
+            content = f"No jobs found for '{original_query}', even after trying broader filters. Here are some suggestions:\n\n"
+            content += "🔍 **Search Tips:**\n"
+            content += "• Use simpler keywords like 'developer' instead of 'React developer'\n"
+            content += "• Remove location restrictions\n"
+            content += "• Try different job titles\n"
+            content += "• Check spelling of keywords\n\n"
+            content += "💡 **Alternative Searches:**\n"
+            content += "• 'software developer jobs'\n"
+            content += "• 'IT jobs'\n"
+            content += "• 'tech jobs'\n"
+            content += "• 'remote jobs'"
         
         return {
             'type': 'plain_text',
@@ -164,11 +222,15 @@ class JobSearchAgent(BaseAgent):
                 'category': 'JOB_SEARCH',
                 'searchParams': search_params,
                 'suggestions': [
-                    'Try broader keywords',
-                    'Remove location restrictions',
+                    'Use simpler keywords',
+                    'Remove location restrictions', 
+                    'Try different job titles',
                     'Check spelling',
-                    'Use different job titles'
-                ]
+                    'Search for "developer jobs"',
+                    'Search for "IT jobs"',
+                    'Search for "remote jobs"'
+                ],
+                'broaderSearchAttempted': True
             }
         }
     
@@ -282,16 +344,11 @@ class JobSearchAgent(BaseAgent):
             'backend': 'Python, Java, Node.js, SQL, REST API, Microservices',
             'full stack': 'JavaScript, Python, React, Node.js, SQL, Git',
             'mobile': 'React Native, Flutter, Android, iOS, JavaScript, Dart',
-            'blockchain': 'Solidity, Ethereum, Smart Contracts, Web3, JavaScript',
-            'cybersecurity': 'Network Security, Penetration Testing, SIEM, Firewall, Linux',
-            'qa': 'Selenium, TestNG, JUnit, Manual Testing, Automation, API Testing',
-            'database': 'SQL, MongoDB, PostgreSQL, MySQL, Redis, Database Design',
-            'system admin': 'Linux, Windows Server, Active Directory, Networking, PowerShell',
-            # Internship-specific mappings
-            'intern': 'Basic Programming, Problem Solving, Team Work, Communication',
-            'internship': 'Basic Programming, Problem Solving, Team Work, Communication',
-            'trainee': 'Basic Programming, Problem Solving, Team Work, Communication',
-            'graduate': 'Basic Programming, Problem Solving, Team Work, Communication'
+            'hr': 'HR Management, Recruitment, Employee Relations, Communication, MS Office, HRIS',
+            'human resources': 'HR Management, Recruitment, Employee Relations, Communication, MS Office, HRIS',
+            'recruitment': 'Recruitment, Sourcing, Interviewing, Communication, ATS, HR Management',
+            'intern': 'Basic Programming, Problem Solving, Team Work, Communication, Learning Ability',
+            'internship': 'Basic Programming, Problem Solving, Team Work, Communication, Learning Ability'
         }
         
         # Check for exact matches first
@@ -651,3 +708,76 @@ class JobSearchAgent(BaseAgent):
                 'content': 'Sorry, there was an error loading more jobs. Please try again.',
                 'metadata': {'error': str(e), 'category': 'JOB_SEARCH'}
             } 
+    
+    def _build_broader_search_params(self, extracted_data: Dict[str, Any], original_params: Dict[str, Any]) -> Dict[str, Any]:
+        """Build broader search parameters when initial search returns no results"""
+        broader_params = original_params.copy()
+        
+        # Remove restrictive filters but keep essential ones
+        broader_params.pop('experience_min', None)
+        broader_params.pop('experience_max', None)
+        broader_params.pop('salary_min', None)
+        broader_params.pop('salary_max', None)
+        broader_params.pop('work_mode', None)
+        broader_params.pop('job_type', None)
+        
+        # IMPORTANT: Remove job_title completely - don't use it in broader search
+        broader_params.pop('job_title', None)
+        
+        # Keep only essential parameters
+        essential_params = {
+            'limit': 5,
+            'page': 1
+        }
+        
+        # Add location if available (keep it)
+        if extracted_data.get('location'):
+            essential_params['locations'] = extracted_data['location']
+        
+        # CRITICAL: Preserve skills from original search to maintain relevance
+        if original_params.get('skills'):
+            essential_params['skills'] = original_params['skills']
+            logger.info(f"🔄 Preserving skills in broader search: {original_params['skills']}")
+        elif extracted_data.get('skills'):
+            essential_params['skills'] = extracted_data['skills']
+            logger.info(f"🔄 Using extracted skills in broader search: {extracted_data['skills']}")
+        
+        # Add experience range but make it broader
+        if extracted_data.get('experience_min') is not None or extracted_data.get('experience_max') is not None:
+            # Broaden experience range
+            exp_min = extracted_data.get('experience_min', 0)
+            exp_max = extracted_data.get('experience_max', 10)
+            
+            # Make range broader: reduce min by 1, increase max by 2
+            broader_min = max(0, exp_min - 1)
+            broader_max = min(15, exp_max + 2)
+            
+            essential_params['experience_min'] = broader_min
+            essential_params['experience_max'] = broader_max
+        
+        # Add salary range but make it broader
+        if extracted_data.get('salary_min') is not None or extracted_data.get('salary_max') is not None:
+            # Broaden salary range
+            salary_min = extracted_data.get('salary_min', 0)
+            salary_max = extracted_data.get('salary_max', 1000000)
+            
+            # Make range broader: reduce min by 20%, increase max by 30%
+            broader_min = max(0, int(salary_min * 0.8))
+            broader_max = int(salary_max * 1.3)
+            
+            essential_params['salary_min'] = broader_min
+            essential_params['salary_max'] = broader_max
+        
+        # Keep internship boolean if present
+        if extracted_data.get('internship') is not None:
+            essential_params['internship'] = extracted_data['internship']
+            if extracted_data['internship']:
+                essential_params['job_type'] = 'internship'
+                essential_params['experience_max'] = 1
+        
+        # If we have a query but no specific job title, use it
+        if extracted_data.get('query') and not extracted_data.get('job_title'):
+            essential_params['query'] = extracted_data['query']
+        
+        logger.info(f"🔄 Built broader search params (no job_title, with skills): {essential_params}")
+        return essential_params 
