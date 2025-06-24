@@ -2,6 +2,10 @@ import logging
 from typing import Dict, Any, List
 from .base_agent import BaseAgent
 from utils.llm_client import LLMClient
+import json
+import redis
+from config import config
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -105,6 +109,58 @@ class JobSearchAgent(BaseAgent):
             total_available = jobs_data.get('total', total_jobs)
             has_more = total_available > 5  # Show load more if more than 5 jobs available
 
+            # Store search context for follow-up searches
+            search_context = {
+                'skills': search_params.get('skills'),
+                'location': extracted_data.get('location'),
+                'query': extracted_data.get('query'),
+                'internship': extracted_data.get('internship'),
+                'experience_min': extracted_data.get('experience_min'),
+                'experience_max': extracted_data.get('experience_max'),
+                'job_title': extracted_data.get('job_title'),
+                'original_query': original_query
+            }
+            
+            # Store in memory manager for session persistence
+            if self.memory_manager:
+                try:
+                    # Store search context for this session
+                    session_id = routing_data.get('sessionId', 'default')
+                    # We'll store this in the memory manager's session data
+                    await self.memory_manager.store_conversation(
+                        session_id, 
+                        f"Search context: {original_query}", 
+                        f"Search params: {json.dumps(search_context)}",
+                        {'search_context': search_context}
+                    )
+                except Exception as e:
+                    logger.warning(f"⚠️ Could not store search context: {str(e)}")
+            
+            # Store current page in Redis for pagination tracking
+            try:
+                current_config = config[os.environ.get('FLASK_ENV', 'development')]
+                redis_url = current_config.REDIS_URL
+                redis_ssl = current_config.REDIS_SSL
+                
+                if redis_ssl:
+                    redis_client = redis.from_url(
+                        redis_url,
+                        decode_responses=True,
+                        ssl=True,
+                        ssl_cert_reqs=None
+                    )
+                else:
+                    redis_client = redis.from_url(
+                        redis_url,
+                        decode_responses=True
+                    )
+                
+                session_id = routing_data.get('sessionId', 'default')
+                redis_client.setex(f"last_page:{session_id}", 3600, "1")  # Store current page
+                logger.info(f"💾 Stored current page 1 for session {session_id}")
+            except Exception as e:
+                logger.warning(f"⚠️ Could not store current page: {str(e)}")
+
             return {
                 'type': 'job_card',
                 'content': content,
@@ -115,6 +171,7 @@ class JobSearchAgent(BaseAgent):
                     'hasMore': has_more,
                     'currentPage': 1,
                     'searchQuery': search_query,
+                    'searchContext': search_context  # Include search context in response
                 }
             }
             
@@ -126,6 +183,35 @@ class JobSearchAgent(BaseAgent):
                 'metadata': {'error': str(e), 'category': 'JOB_SEARCH'}
             }
     
+    def _safe_extract(self, obj, key, default=""):
+        """Safely extract a value from an object, handling nested structures"""
+        try:
+            if isinstance(obj, dict):
+                value = obj.get(key, default)
+            elif hasattr(obj, key):
+                value = getattr(obj, key, default)
+            else:
+                value = default
+            
+            # Handle nested objects and lists
+            if isinstance(value, (dict, list)):
+                if isinstance(value, dict):
+                    # For nested objects, try to get a meaningful string representation
+                    if 'name' in value:
+                        return str(value['name'])
+                    elif 'text' in value:
+                        return str(value['text'])
+                    else:
+                        return str(value)
+                elif isinstance(value, list):
+                    # For lists, join with commas
+                    return ', '.join(str(item) for item in value[:3])  # Limit to first 3 items
+            else:
+                return str(value) if value is not None else default
+        except Exception as e:
+            logger.warning(f"⚠️ Error extracting {key} from {type(obj)}: {str(e)}")
+            return default
+
     def format_job_for_response(self, job: Dict[str, Any]) -> Dict[str, Any]:
         """Format job data for response following the specified structure"""
         
@@ -539,7 +625,6 @@ class JobSearchAgent(BaseAgent):
             logger.info(f"🧠 LLM raw response: {llm_response}")
             
             # Try to parse the JSON response
-            import json
             try:
                 # Clean the response (remove any extra text)
                 response_lines = llm_response.strip().split('\n')
@@ -642,72 +727,172 @@ class JobSearchAgent(BaseAgent):
         logger.info(f"🔄 Fallback parsing result: {params}")
         return params 
     
-    async def search_jobs_follow_up(self, routing_data: Dict[str, Any], current_page: int = 1) -> Dict[str, Any]:
-        """Handle follow-up job searches with pagination"""
+    async def search_jobs_follow_up(self, routing_data: Dict[str, Any], page: int = 2) -> Dict[str, Any]:
+        """Follow-up job search for pagination"""
         try:
-            token = routing_data.get('token', '')
-            base_url = routing_data.get('baseUrl', self.base_url)
-            session_id = routing_data.get('sessionId', 'default')
-            original_query = routing_data.get('originalQuery', '')
+            logger.info(f"🔄 Follow-up job search for page {page}")
+            
+            # Get the original search context
             extracted_data = routing_data.get('extractedData', {})
+            original_query = routing_data.get('originalQuery', '')
             
-            # Update search parameters for pagination
-            search_params = self._build_search_params(extracted_data, {}, {})
-            search_params['page'] = current_page
-            search_params['limit'] = 5  # Keep consistent with initial search limit
+            # Build search parameters for follow-up
+            search_params = {
+                'limit': 5,
+                'page': page
+            }
             
-            # Search for jobs using the JobMato API
-            job_search_result = await self.search_jobs_tool(token, base_url, **search_params)
+            # Add skills if available
+            if extracted_data.get('skills'):
+                search_params['skills'] = extracted_data['skills']
             
-            if not job_search_result.get('success'):
-                return self._handle_search_failure(original_query, extracted_data.get('language', 'english'))
+            # Add location if available
+            if extracted_data.get('location'):
+                search_params['location'] = extracted_data['location']
             
-            jobs_data = job_search_result.get('data', {})
-            jobs = jobs_data.get('jobs', [])
+            # Add experience filters if available
+            if extracted_data.get('experience_min') is not None:
+                search_params['experience_min'] = extracted_data['experience_min']
+            if extracted_data.get('experience_max') is not None:
+                search_params['experience_max'] = extracted_data['experience_max']
+            
+            # Add internship filter if available
+            if extracted_data.get('internship'):
+                search_params['internship'] = True
+                search_params['job_type'] = 'internship'
+            
+            # Add job title if available
+            if extracted_data.get('job_title'):
+                search_params['job_title'] = extracted_data['job_title']
+            
+            logger.info(f"🔄 Follow-up search params: {search_params}")
+            
+            # Perform the search
+            jobs_response = await self.search_jobs_tool(
+                skills=search_params.get('skills'),
+                location=search_params.get('location'),
+                job_title=search_params.get('job_title'),
+                experience_min=search_params.get('experience_min'),
+                experience_max=search_params.get('experience_max'),
+                internship=search_params.get('internship'),
+                limit=search_params['limit'],
+                page=search_params['page']
+            )
+            
+            if not jobs_response or not jobs_response.get('success'):
+                return {
+                    'type': 'plain_text',
+                    'content': 'No more jobs found. Try adjusting your search criteria.',
+                    'metadata': {'error': 'No more jobs'}
+                }
+            
+            jobs = jobs_response.get('jobs', [])
+            total_jobs = jobs_response.get('total', 0)
             
             if not jobs:
                 return {
                     'type': 'plain_text',
                     'content': 'No more jobs found. Try adjusting your search criteria.',
-                    'metadata': {'error': 'No more jobs', 'category': 'JOB_SEARCH'}
+                    'metadata': {'error': 'No more jobs'}
                 }
             
-            # Format jobs for response
+            # Store current page in Redis for pagination tracking
+            try:
+                current_config = config[os.environ.get('FLASK_ENV', 'development')]
+                redis_url = current_config.REDIS_URL
+                redis_ssl = current_config.REDIS_SSL
+                
+                if redis_ssl:
+                    redis_client = redis.from_url(
+                        redis_url,
+                        decode_responses=True,
+                        ssl=True,
+                        ssl_cert_reqs=None
+                    )
+                else:
+                    redis_client = redis.from_url(
+                        redis_url,
+                        decode_responses=True
+                    )
+                
+                session_id = routing_data.get('sessionId', 'default')
+                redis_client.setex(f"last_page:{session_id}", 3600, str(page))
+                logger.info(f"💾 Stored current page {page} for session {session_id}")
+            except Exception as e:
+                logger.warning(f"⚠️ Could not store current page: {str(e)}")
+            
+            # Format jobs for display
             formatted_jobs = []
             for job in jobs:
-                formatted_job = self.format_job_for_response(job)
+                formatted_job = {
+                    'title': self._safe_extract(job, 'title'),
+                    'company': self._safe_extract(job, 'company'),
+                    'location': self._safe_extract(job, 'location'),
+                    'job_type': self._safe_extract(job, 'job_type'),
+                    'experience': self._safe_extract(job, 'experience'),
+                    'skills': self._safe_extract(job, 'skills'),
+                    'salary': self._safe_extract(job, 'salary'),
+                    'apply_url': self._safe_extract(job, 'apply_url'),
+                    'source': self._safe_extract(job, 'source')
+                }
                 formatted_jobs.append(formatted_job)
             
-            # Create dynamic message for follow-up
-            total_jobs = len(formatted_jobs)
-            search_query = routing_data.get('searchQuery') or routing_data.get('originalQuery', 'default search')
+            # Calculate pagination info
+            jobs_per_page = search_params['limit']
+            total_pages = (total_jobs + jobs_per_page - 1) // jobs_per_page
+            has_more = page < total_pages
             
-            content = f"Here are {total_jobs} more job opportunities that might interest you:"
+            # Create response message
+            if has_more:
+                message = f"Here are {len(formatted_jobs)} more job opportunities:\n\n📋 Job Opportunities\nShowing page {page} of {total_pages} (Jobs {((page-1) * jobs_per_page) + 1}-{min(page * jobs_per_page, total_jobs)} of {total_jobs})"
+            else:
+                message = f"Here are the final {len(formatted_jobs)} job opportunities:\n\n📋 Job Opportunities\nFinal page {page} of {total_pages} (Jobs {((page-1) * jobs_per_page) + 1}-{total_jobs} of {total_jobs})"
             
-            # Calculate if there are more jobs available
-            total_available = jobs_data.get('total', 0)
-            has_more = total_available > (current_page * 5)  # Check if more than current page * 5
+            # Store in memory
+            if self.memory_manager:
+                try:
+                    await self.memory_manager.add_message(
+                        session_id=routing_data.get('sessionId', 'default'),
+                        message=f"Load more jobs request - Page {page}",
+                        sender='user',
+                        metadata={'page': page, 'total_pages': total_pages}
+                    )
+                    
+                    await self.memory_manager.add_message(
+                        session_id=routing_data.get('sessionId', 'default'),
+                        message=message,
+                        sender='assistant',
+                        metadata={
+                            'type': 'job_card',
+                            'jobs_count': len(formatted_jobs),
+                            'page': page,
+                            'total_pages': total_pages,
+                            'has_more': has_more
+                        }
+                    )
+                except Exception as e:
+                    logger.warning(f"⚠️ Could not store follow-up search in memory: {str(e)}")
             
             return {
                 'type': 'job_card',
-                'content': content,
+                'content': message,
                 'metadata': {
                     'jobs': formatted_jobs,
-                    'totalJobs': total_available,
-                    'isFollowUp': True,
+                    'totalJobs': total_jobs,
+                    'currentPage': page,
+                    'totalPages': total_pages,
                     'hasMore': has_more,
-                    'currentPage': current_page,
-                    'searchQuery': search_query,
+                    'searchContext': extracted_data
                 }
             }
             
         except Exception as e:
-            logger.error(f"Error in follow-up job search: {str(e)}")
+            logger.error(f"❌ Error in follow-up job search: {str(e)}")
             return {
                 'type': 'plain_text',
                 'content': 'Sorry, there was an error loading more jobs. Please try again.',
-                'metadata': {'error': str(e), 'category': 'JOB_SEARCH'}
-            } 
+                'metadata': {'error': str(e)}
+            }
     
     def _build_broader_search_params(self, extracted_data: Dict[str, Any], original_params: Dict[str, Any]) -> Dict[str, Any]:
         """Build broader search parameters when initial search returns no results"""

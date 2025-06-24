@@ -380,7 +380,7 @@ def handle_disconnect():
     user_data_store.pop(request.sid, None)  # Clean up user data
 
 @socketio.on(current_config.SOCKET_EVENTS['init_chat'])
-def handle_init_chat(data):
+def handle_init_chat(data=None):
     """Initialize a new chat session or load existing with enhanced error handling"""
     try:
         user_id = get_user_id()
@@ -495,6 +495,28 @@ def handle_send_message(data):
         message = data.get('message', '')
         if not message or not isinstance(message, str):
             raise Exception("Invalid message format")
+        
+        # Check if this is a load more request
+        if message.lower().strip() in ['load more', 'load more jobs', 'more jobs', 'next page']:
+            # Handle as load more request instead of new search
+            logger.info(f"🔄 Detected load more request: {message}")
+            
+            # Get current page from session
+            current_page = 1  # Default to page 1
+            if redis_client:
+                try:
+                    last_page = redis_client.get(f"last_page:{session_id}")
+                    if last_page:
+                        current_page = int(last_page) + 1
+                except Exception as e:
+                    logger.warning(f"⚠️ Could not get last page: {str(e)}")
+            
+            # Emit load more event
+            socketio.emit('load_more_jobs', {
+                'page': current_page,
+                'searchQuery': 'load more request'
+            }, room=request.sid)
+            return
         
         # Check message length
         if len(message) > current_config.MAX_MESSAGE_LENGTH:
@@ -617,20 +639,42 @@ def handle_load_more_jobs(data):
         current_page = data.get('page', 1)
         search_query = data.get('searchQuery', '')
         
-        logger.info(f"📄 Loading more jobs for user {user_id}, page {current_page}")
+        logger.info(f"📄 Loading more jobs for user {user_id}, page {current_page}, query: {search_query}")
+        
+        # Get the last job search context from Redis
+        extracted_data = {}
+        if redis_client:
+            try:
+                # Try to get the last search context from Redis
+                last_search_context = redis_client.get(f"last_search_context:{session_id}")
+                if last_search_context:
+                    extracted_data = json.loads(last_search_context)
+                    logger.info(f"🔄 Retrieved search context from Redis: {extracted_data}")
+                else:
+                    logger.warning(f"⚠️ No search context found in Redis for session {session_id}")
+            except Exception as e:
+                logger.warning(f"⚠️ Could not retrieve search context from Redis: {str(e)}")
+        
+        # If no search context found, we can't do a proper follow-up search
+        if not extracted_data:
+            emit(current_config.SOCKET_EVENTS['receive_message'], {
+                'content': 'Unable to load more jobs. Please perform a new search first.',
+                'type': 'plain_text',
+                'metadata': {'error': 'No search context'}
+            }, room=request.sid)
+            return
         
         # Prepare routing data for follow-up search
         routing_data = {
             'token': get_user_data().get('token', ''),
             'baseUrl': current_config.JOBMATO_API_BASE_URL,
             'sessionId': session_id,
-            'originalQuery': search_query,
-            'searchQuery': search_query,
-            'extractedData': {
-                'query': search_query,
-                'page': current_page
-            }
+            'originalQuery': extracted_data.get('original_query', search_query),
+            'searchQuery': extracted_data.get('original_query', search_query),
+            'extractedData': extracted_data
         }
+        
+        logger.info(f"🔄 Follow-up search routing data: {routing_data}")
         
         # Call follow-up job search
         response = asyncio.run(chatbot.job_search_agent.search_jobs_follow_up(routing_data, current_page))
@@ -691,6 +735,11 @@ def handle_agent_response(socket, response):
                 # Cache jobs and metadata for session replay
                 redis_client.setex(f"job_agent:jobs:{session_id}", 3600, json.dumps(metadata.get('jobs')))
                 redis_client.setex(f"job_agent:metadata:{session_id}", 3600, json.dumps(metadata))
+                
+                # Store search context for follow-up searches
+                if metadata.get('searchContext'):
+                    redis_client.setex(f"last_search_context:{session_id}", 3600, json.dumps(metadata['searchContext']))
+                    logger.info(f"💾 Stored search context for session {session_id}")
             except Exception as e:
                 logger.warn(f"⚠️ Failed to cache job data: {str(e)}")
     

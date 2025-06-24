@@ -604,9 +604,12 @@
                         this.hasMoreJobs = data.metadata.hasMore || false;
                         if (data.metadata.isFollowUp) {
                             this.currentPage = data.metadata.currentPage || 1;
+                            // Re-enable load more button for follow-up responses
+                            this.updateLoadMoreButton();
                         } else {
                             this.currentPage = 1; // Reset for new search
                         }
+                        console.log(`Job search state: hasMore=${this.hasMoreJobs}, page=${this.currentPage}, query="${this.currentSearchQuery}"`);
                     }
                     
                     // Check if response suggests uploading resume
@@ -1022,6 +1025,19 @@
                 }, 5000);
             }
             
+            updateLoadMoreButton() {
+                const loadMoreBtn = document.querySelector('.load-more-btn');
+                if (loadMoreBtn) {
+                    if (this.hasMoreJobs) {
+                        loadMoreBtn.disabled = false;
+                        loadMoreBtn.textContent = 'Load More Jobs';
+                    } else {
+                        loadMoreBtn.disabled = true;
+                        loadMoreBtn.textContent = 'No More Jobs';
+                    }
+                }
+            }
+            
             loadMoreJobs() {
                 if (!this.hasMoreJobs || !this.currentSearchQuery) {
                     console.log('No more jobs to load or no search query');
@@ -1042,6 +1058,15 @@
                     page: this.currentPage + 1,
                     searchQuery: this.currentSearchQuery
                 });
+                
+                // Set a timeout to re-enable button if no response
+                setTimeout(() => {
+                    if (loadMoreBtn && loadMoreBtn.textContent === 'Loading...') {
+                        loadMoreBtn.disabled = false;
+                        loadMoreBtn.textContent = 'Load More Jobs';
+                        console.log('Load more request timed out, re-enabling button');
+                    }
+                }, 10000); // 10 second timeout
             }
         }
         
