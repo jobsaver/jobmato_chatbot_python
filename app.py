@@ -544,6 +544,19 @@ def handle_send_message(data):
         if not response.get('content'):
             raise Exception("Empty response content received from chatbot")
         
+        # Store conversation in database
+        try:
+            asyncio.run(chatbot.memory_manager.store_conversation(
+                session_id=session_id,
+                user_message=message,
+                assistant_message=response.get('content', ''),
+                metadata=response.get('metadata', {}),
+                user_id=user_id
+            ))
+            logger.info(f"💾 Conversation stored for session {session_id}")
+        except Exception as e:
+            logger.error(f"❌ Failed to store conversation: {str(e)}")
+        
         # Cache response for potential replay
         if redis_client:
             try:

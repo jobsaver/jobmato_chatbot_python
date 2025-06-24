@@ -7,6 +7,34 @@ import json
 
 logger = logging.getLogger(__name__)
 
+def validate_user_profile(user_profile):
+    if not user_profile:
+        return {}
+    return {
+        "personalInfo": user_profile.get("personalInfo", {}),
+        "skills": user_profile.get("skills", []),
+        "education": [
+            {
+                "degree": edu.get("degree"),
+                "field": edu.get("field"),
+                "institution": edu.get("institution"),
+                "year": edu.get("year"),
+            }
+            for edu in user_profile.get("education", []) if isinstance(edu, dict)
+        ],
+        "workExperience": user_profile.get("workExperience", []),
+        "projectsAndCertificates": user_profile.get("projectsAndCertificates", []),
+    }
+
+def validate_message(message):
+    return {
+        "role": message.get("role", "user"),
+        "content": message.get("content", ""),
+        "timestamp": message.get("timestamp"),
+        "type": message.get("type", "plain_text"),
+        "metadata": message.get("metadata", {}),
+    }
+
 class MongoDBManager:
     """Manages MongoDB operations for chat session storage (chatsessions collection)"""
     
@@ -57,15 +85,17 @@ class MongoDBManager:
             logger.warning(f"⚠️ Could not create indexes: {str(e)}")
     
     async def upsert_message(self, session_id: str, user_id: str, message: Dict[str, Any], user_profile: Optional[Dict[str, Any]] = None, metadata: Optional[Dict[str, Any]] = None):
-        """Upsert a message into the chat session's messages array"""
+        """Upsert a message into the chat session's messages array, enforcing schema"""
         if not self.connected:
             logger.warning("MongoDB not connected, attempting to reconnect...")
             self._connect()
             if not self.connected:
                 return False
-        
         try:
             now = datetime.utcnow()
+            # Validate/format userProfile and message
+            formatted_user_profile = validate_user_profile(user_profile) if user_profile else None
+            formatted_message = validate_message(message)
             update_doc = {
                 '$setOnInsert': {
                     'sessionId': session_id,
@@ -77,11 +107,11 @@ class MongoDBManager:
                     'updatedAt': now,
                 },
                 '$push': {
-                    'messages': message
+                    'messages': formatted_message
                 }
             }
-            if user_profile:
-                update_doc['$set']['userProfile'] = user_profile
+            if formatted_user_profile:
+                update_doc['$set']['userProfile'] = formatted_user_profile
             if metadata:
                 update_doc['$set']['metadata'] = metadata
             self.collection.update_one(
@@ -91,7 +121,6 @@ class MongoDBManager:
             )
             logger.info(f"💾 Message upserted for session {session_id}")
             return True
-            
         except Exception as e:
             logger.error(f"❌ Error upserting message: {str(e)}")
             return False
