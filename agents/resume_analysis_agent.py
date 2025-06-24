@@ -90,7 +90,7 @@ Always provide specific, actionable feedback with examples and consider previous
                 await self.memory_manager.store_conversation(session_id, original_query, analysis_response)
             
             return self.create_response(
-                'resume_analysis',
+                'plain_text',
                 analysis_response,
                 {
                     'category': 'RESUME_ANALYSIS',
@@ -98,7 +98,7 @@ Always provide specific, actionable feedback with examples and consider previous
                     'language': extracted_data.get('language', 'english'),
                     'analysis_type': self._classify_analysis_type(original_query),
                     'has_previous_analysis': bool(conversation_context and "resume" in conversation_context.lower()),
-                    'resume_sections_found': self._identify_resume_sections(resume_data)
+                    'resume_sections_found': self._identify_resume_sections(resume_data),
                 }
             )
             
