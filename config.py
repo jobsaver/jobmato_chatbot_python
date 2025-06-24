@@ -18,14 +18,14 @@ class Config:
     JOBMATO_API_BASE_URL = os.environ.get('JOBMATO_API_BASE_URL', 'https://backend-v1.jobmato.com')
     
     # MongoDB configuration
-    MONGODB_URI = 'MONGODB_URI', 'mongodb+srv://doadmin:064CU93w5RlQvz18@db-postgresql-blr1--main-db-009faed0.mongo.ondigitalocean.com'
+    MONGODB_URI = os.environ.get('MONGODB_URI', 'mongodb+srv://doadmin:064CU93w5RlQvz18@db-postgresql-blr1--main-db-009faed0.mongo.ondigitalocean.com')
     MONGODB_DATABASE = 'admin'
     MONGODB_COLLECTION = 'chatsessions'
     
     # Redis configuration for WebSocket session management
-    REDIS_URL = os.environ.get('REDIS_URL', 'redis://localhost:6379')
+    REDIS_URL = os.environ.get('REDIS_URL', 'redis://143.244.135.42')
     REDIS_DB = int(os.environ.get('REDIS_DB', '0'))
-    REDIS_PASSWORD = os.environ.get('REDIS_PASSWORD')
+    REDIS_PASSWORD = os.environ.get('REDIS_PASSWORD', 'SgYEtc6WAOgalgLviUDHFV1Yskt')
     REDIS_SSL = os.environ.get('REDIS_SSL', 'False').lower() in ['true', '1', 'yes']
     
     # Session configuration
@@ -118,14 +118,15 @@ class DevelopmentConfig(Config):
     DEBUG = True
     LOG_LEVEL = 'DEBUG'
     REDIS_SSL = False
-    REDIS_URL = 'redis://localhost:6379'
+    REDIS_URL = 'redis://143.244.135.42'
     MONGODB_COLLECTION = 'chatsessions'
 
 class ProductionConfig(Config):
     """Production configuration"""
     DEBUG = False
     LOG_LEVEL = 'WARNING'
-    REDIS_SSL = True
+    REDIS_SSL = False
+    REDIS_URL = 'redis://143.244.135.42'
     # Production Redis URL should be set via environment variable
     MONGODB_COLLECTION = 'chatsessions'
 
@@ -134,7 +135,7 @@ class TestingConfig(Config):
     TESTING = True
     DEBUG = True
     LOG_LEVEL = 'DEBUG'
-    REDIS_URL = 'redis://localhost:6379'
+    REDIS_URL = 'redis://143.244.135.42'
     REDIS_SSL = False
     MONGODB_COLLECTION = 'chatsessions'
 

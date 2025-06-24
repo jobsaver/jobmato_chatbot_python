@@ -45,22 +45,21 @@ redis_client = None
 try:
     redis_url = current_config.REDIS_URL
     redis_ssl = current_config.REDIS_SSL
+    redis_password = current_config.REDIS_PASSWORD
     
-    # Configure Redis connection with SSL support for online services
-    if redis_ssl:
-        # For online Redis services with SSL
+    # For Redis with password authentication
+    if redis_password and redis_password != 'None':
         redis_client = redis.from_url(
             redis_url,
+            password=redis_password,
             decode_responses=True,
-            ssl=True,
-            ssl_cert_reqs=None,  # Don't verify SSL certificate
             socket_connect_timeout=5,
             socket_timeout=5,
             retry_on_timeout=False,
             health_check_interval=0  # Disable health check to avoid recursion
         )
     else:
-        # For local Redis or non-SSL connections
+        # For local Redis or non-SSL connections without password
         redis_client = redis.from_url(
             redis_url,
             decode_responses=True,
