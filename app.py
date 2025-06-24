@@ -444,20 +444,6 @@ def handle_init_chat(data=None):
         emit(current_config.SOCKET_EVENTS['session_status'], response, room=request.sid)
         emit('init_response', response, room=request.sid)
         
-        # Send welcome message
-        try:
-            welcome_data = {
-                'chatInput': 'Hello',
-                'sessionId': session_id,
-                'token': get_user_data().get('token', ''),
-                'baseUrl': current_config.JOBMATO_API_BASE_URL
-            }
-            welcome_response = asyncio.run(chatbot.process_message(welcome_data))
-            if welcome_response:
-                handle_agent_response(request, welcome_response)
-        except Exception as welcome_error:
-            logger.warn(f"⚠️ Failed to send welcome message: {str(welcome_error)}")
-        
     except Exception as e:
         logger.error(f"❌ Init chat error: {str(e)}")
         error_response = {
