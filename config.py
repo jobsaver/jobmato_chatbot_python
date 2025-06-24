@@ -80,7 +80,8 @@ class Config:
         'session_status': 'session_status',
         'error': 'error',
         'chat_history': 'chat_history',
-        'clear_session': 'clear_session'
+        'clear_session': 'clear_session',
+        'load_more_jobs': 'load_more_jobs'
     }
     
     # Agent Types Configuration

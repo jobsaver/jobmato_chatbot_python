@@ -342,6 +342,50 @@
             font-size: 0.9rem;
         }
 
+        .job-card a {
+            display: inline-block;
+            margin-top: 8px;
+            padding: 6px 12px;
+            background: #3b82f6;
+            color: white;
+            text-decoration: none;
+            border-radius: 6px;
+            font-size: 0.85rem;
+            transition: background 0.3s ease;
+        }
+
+        .job-card a:hover {
+            background: #2563eb;
+        }
+
+        .job-pagination {
+            text-align: center;
+            margin-top: 15px;
+            padding: 10px;
+        }
+
+        .load-more-btn {
+            background: linear-gradient(135deg, #4f46e5, #7c3aed);
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 25px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            transition: all 0.3s ease;
+        }
+
+        .load-more-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(79, 70, 229, 0.3);
+        }
+
+        .load-more-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
         .welcome-message {
             text-align: center;
             padding: 40px 20px;
@@ -478,6 +522,11 @@
                 this.connected = false;
                 this.authenticated = false;
                 
+                // Job search state tracking
+                this.currentSearchQuery = '';
+                this.currentPage = 1;
+                this.hasMoreJobs = false;
+                
                 // JWT Token for authentication (in production, this should come from your auth system)
                 this.jwtToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjY4NDcxMDBlYTQxN2IwMGEyMGYzZjA1MSIsImVtYWlsIjoiaGFja3lhYmhheUBnbWFpbC5jb20iLCJpYXQiOjE3NTA1Nzk4MDYsImV4cCI6MTc1MTE4NDYwNn0.5cMF3TDItaJt7JPONtHEF3lAe-qgL8Q8ujwMagC1fVo';
                 
@@ -548,6 +597,17 @@
                     console.log('💬 Received message:', data);
                     this.hideTypingIndicator();
                     this.addMessage(data.content, 'assistant', data);
+                    
+                    // Track job search state for pagination
+                    if (data.type === 'job_card' && data.metadata) {
+                        this.currentSearchQuery = data.metadata.searchQuery || '';
+                        this.hasMoreJobs = data.metadata.hasMore || false;
+                        if (data.metadata.isFollowUp) {
+                            this.currentPage = data.metadata.currentPage || 1;
+                        } else {
+                            this.currentPage = 1; // Reset for new search
+                        }
+                    }
                     
                     // Check if response suggests uploading resume
                     this.checkForUploadSuggestion(data);
@@ -753,22 +813,33 @@
                 let html = `<p>${content}</p>`;
                 
                 if (jobs && jobs.length > 0) {
-                    jobs.slice(0, 3).forEach(job => { // Show only first 3 jobs
+                    jobs.forEach(job => {
                         html += `
                             <div class="job-card">
-                                <h4>${job.title || job.job_title || 'Job Title'}</h4>
+                                <h4>${job.job_title || job.title || 'Job Title'}</h4>
                                 <p><strong>Company:</strong> ${job.company || 'Not specified'}</p>
-                                <p><strong>Location:</strong> ${job.location || 'Not specified'}</p>
+                                <p><strong>Location:</strong> ${job.location || (job.locations && job.locations.length > 0 ? job.locations.join(', ') : 'Not specified')}</p>
                                 <p><strong>Experience:</strong> ${job.experience || 'Not specified'}</p>
                                 ${job.salary ? `<p><strong>Salary:</strong> ${job.salary}</p>` : ''}
-                                ${job.workMode || job.work_mode ? `<p><strong>Work Mode:</strong> ${job.workMode || job.work_mode}</p>` : ''}
-                                ${job.skills && job.skills.length > 0 ? `<p><strong>Skills:</strong> ${job.skills.slice(0, 3).join(', ')}</p>` : ''}
+                                ${job.work_mode ? `<p><strong>Work Mode:</strong> ${job.work_mode}</p>` : ''}
+                                ${job.job_type ? `<p><strong>Job Type:</strong> ${job.job_type}</p>` : ''}
+                                ${job.skills && job.skills.length > 0 ? `<p><strong>Skills:</strong> ${job.skills.slice(0, 5).join(', ')}${job.skills.length > 5 ? '...' : ''}</p>` : ''}
+                                ${job.description ? `<p><strong>Description:</strong> ${job.description.length > 150 ? job.description.substring(0, 150) + '...' : job.description}</p>` : ''}
+                                ${job.posted_date ? `<p><strong>Posted:</strong> ${new Date(job.posted_date).toLocaleDateString()}</p>` : ''}
+                                ${job.apply_url ? `<p><a href="${job.apply_url}" target="_blank" style="color: #3b82f6; text-decoration: none;">Apply Now →</a></p>` : ''}
                             </div>
                         `;
                     });
                     
-                    if (jobs.length > 3) {
-                        html += `<p style="margin-top: 10px; font-style: italic;">And ${jobs.length - 3} more jobs...</p>`;
+                    // Add pagination controls if there are more jobs
+                    if (this.hasMoreJobs) {
+                        html += `
+                            <div class="job-pagination">
+                                <button class="load-more-btn" onclick="chatbot.loadMoreJobs()">
+                                    Load More Jobs
+                                </button>
+                            </div>
+                        `;
                     }
                 }
                 
@@ -950,11 +1021,33 @@
                     }
                 }, 5000);
             }
+            
+            loadMoreJobs() {
+                if (!this.hasMoreJobs || !this.currentSearchQuery) {
+                    console.log('No more jobs to load or no search query');
+                    return;
+                }
+                
+                console.log(`Loading more jobs for query: "${this.currentSearchQuery}", page: ${this.currentPage + 1}`);
+                
+                // Disable the load more button
+                const loadMoreBtn = document.querySelector('.load-more-btn');
+                if (loadMoreBtn) {
+                    loadMoreBtn.disabled = true;
+                    loadMoreBtn.textContent = 'Loading...';
+                }
+                
+                // Send load more request
+                this.socket.emit('load_more_jobs', {
+                    page: this.currentPage + 1,
+                    searchQuery: this.currentSearchQuery
+                });
+            }
         }
         
         // Initialize the chatbot when the page loads
         document.addEventListener('DOMContentLoaded', () => {
-            new JobMatoChatbot();
+            window.chatbot = new JobMatoChatbot();
         });
     </script>
 </body>

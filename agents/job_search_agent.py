@@ -71,58 +71,102 @@ class JobSearchAgent(BaseAgent):
             if not jobs:
                 return self._handle_no_jobs_found(original_query, search_params, extracted_data.get('language', 'english'))
             
-            # Build context for LLM response
-            context = self.build_context_prompt(
-                current_query=original_query,
-                session_id=session_id,
-                profile_data=profile_data,
-                resume_data=resume_data,
-                conversation_context=conversation_context,
-                language=extracted_data.get('language', 'english')
-            )
+            # Format jobs for response (don't send raw data to AI)
+            formatted_jobs = []
+            for job in jobs:
+                formatted_job = self.format_job_for_response(job)
+                formatted_jobs.append(formatted_job)
             
-            # Add job search results to context
-            context += f"\n\nJob Search Results: {jobs_data}"
-            context += f"\nSearch Parameters Used: {search_params}"
+            # Create dynamic 2-line message based on results
+            total_jobs = len(formatted_jobs)
+            search_query = routing_data.get('searchQuery') or routing_data.get('originalQuery', 'default search')
             
-            # Generate personalized response using LLM
-            response_text = await self.llm_client.generate_response(context, self.system_message)
+            if total_jobs == 1:
+                content = f"Here's a job opportunity that matches your search for '{search_query}':"
+            else:
+                content = f"Here are {total_jobs} job opportunities that might interest you:"
             
-            # Store conversation in memory
+            # Store conversation in memory (without raw job data)
             if self.memory_manager:
-                await self.memory_manager.store_conversation(session_id, original_query, response_text)
+                await self.memory_manager.store_conversation(session_id, original_query, f"Found {total_jobs} jobs matching the search criteria")
 
-            total_jobs = len(jobs)
-            
-            return self.create_response(
-                'job_search',
-                response_text,
-                {
-                    'jobs': jobs[:10],  # Limit to top 10 jobs for UI
-                    'totalJobs': total_jobs,
+            return {
+                'type': 'job_card',
+                'content': content,
+                'metadata': {
+                    'jobs': formatted_jobs,
+                    'totalJobs': jobs_data.get('total', total_jobs),
+                    'isFollowUp': False,
+                    'hasMore': jobs_data.get('total', total_jobs) > total_jobs,
                     'currentPage': 1,
-                    'hasMore': len(jobs) > 10,
-                    'category': 'JOB_SEARCH',
-                    'sessionId': session_id,
-                    'language': extracted_data.get('language', 'english'),
-                    'currentPage': jobs_data.get('page', 1) if isinstance(jobs_data, dict) else 1,
-                    'searchQuery': routing_data.get('searchQuery') or routing_data.get('originalQuery'),
-                    'searchParams': search_params,
-                    'debug': {
-                        'raw_response_keys': list(jobs_data.keys()) if isinstance(jobs_data, dict) else None,
-                        'jobs_count': len(jobs) if isinstance(jobs, list) else 0,
-                        'api_total': jobs_data.get('total') if isinstance(jobs_data, dict) else None
-                    }
+                    'searchQuery': search_query,
                 }
-            )
+            }
             
         except Exception as e:
             logger.error(f"Error in job search: {str(e)}")
-            return self.create_response(
-                'plain_text',
-                'Sorry yaar, job search mein kuch technical issue ho gaya! 😅 Please try again, main help karunga.',
-                {'error': str(e), 'category': 'JOB_SEARCH'}
-            )
+            return {
+                'type': 'plain_text',
+                'content': 'Sorry yaar, job search mein kuch technical issue ho gaya! 😅 Please try again, main help karunga.',
+                'metadata': {'error': str(e), 'category': 'JOB_SEARCH'}
+            }
+    
+    def format_job_for_response(self, job: Dict[str, Any]) -> Dict[str, Any]:
+        """Format job data for response following the specified structure"""
+        return {
+            '_id': job.get('_id'),
+            'job_id': job.get('job_id'),
+            'job_title': job.get('job_title'),
+            'company': job.get('company'),
+            'locations': job.get('locations'),
+            'location': job.get('locations', [])[0] if job.get('locations') else job.get('location'),
+            'experience': job.get('experience'),
+            'salary': job.get('salary'),
+            'skills': job.get('skills'),
+            'work_mode': job.get('work_mode'),
+            'job_type': job.get('job_type'),
+            'description': job.get('description'),
+            'posted_date': job.get('posted_date'),
+            'source_url': job.get('source_url'),
+            'apply_url': job.get('apply_url'),
+            'source_platform': job.get('source_platform'),
+        }
+    
+    def _handle_search_failure(self, original_query: str, language: str = 'english') -> Dict[str, Any]:
+        """Handle job search failure"""
+        if language in ['hindi', 'hinglish']:
+            content = f"Sorry yaar, '{original_query}' ke liye job search mein kuch technical issue ho gaya! 😅 Please try again with different keywords."
+        else:
+            content = f"Sorry, I encountered a technical issue while searching for '{original_query}'. Please try again with different keywords."
+        
+        return {
+            'type': 'plain_text',
+            'content': content,
+            'metadata': {'error': 'search_failed', 'category': 'JOB_SEARCH'}
+        }
+    
+    def _handle_no_jobs_found(self, original_query: str, search_params: Dict[str, Any], language: str = 'english') -> Dict[str, Any]:
+        """Handle case when no jobs are found"""
+        if language in ['hindi', 'hinglish']:
+            content = f"'{original_query}' ke liye koi jobs nahi mili. Try using different keywords, removing specific requirements, or searching for broader terms like 'developer' or 'engineer'."
+        else:
+            content = f"No jobs found for '{original_query}'. Try using different keywords, removing specific requirements, or searching for broader terms like 'developer' or 'engineer'."
+        
+        return {
+            'type': 'plain_text',
+            'content': content,
+            'metadata': {
+                'error': 'no_jobs_found',
+                'category': 'JOB_SEARCH',
+                'searchParams': search_params,
+                'suggestions': [
+                    'Try broader keywords',
+                    'Remove location restrictions',
+                    'Check spelling',
+                    'Use different job titles'
+                ]
+            }
+        }
     
     def _build_search_params(self, extracted_data: Dict[str, Any], profile_data: Dict[str, Any], resume_data: Dict[str, Any]) -> Dict[str, Any]:
         """Build comprehensive search parameters from extracted data using JobMato Tools"""
@@ -147,9 +191,15 @@ class JobSearchAgent(BaseAgent):
         if extracted_data.get('locations'):
             params['locations'] = extracted_data['locations']
         
-        # 🛠️ Skills and domain parameters
-        if extracted_data.get('skills'):
+        # 🛠️ Skills and domain parameters - Enhanced with auto-skill detection
+        skills = self._enhance_skills_from_job_title(extracted_data)
+        if skills:
+            params['skills'] = skills
+            logger.info(f"🎯 Using enhanced skills: {skills}")
+        elif extracted_data.get('skills'):
             params['skills'] = extracted_data['skills']
+            logger.info(f"🎯 Using extracted skills: {extracted_data['skills']}")
+            
         if extracted_data.get('industry'):
             params['industry'] = extracted_data['industry']
         if extracted_data.get('domain'):
@@ -176,6 +226,11 @@ class JobSearchAgent(BaseAgent):
         # 🎓 Internship filter
         if extracted_data.get('internship') is not None:
             params['internship'] = extracted_data['internship']
+            # If internship is true, set appropriate defaults
+            if extracted_data['internship']:
+                params['job_type'] = 'internship'
+                params['experience_max'] = 1  # Max 1 year for internships
+                logger.info(f"🎓 Detected internship search, setting job_type: internship, experience_max: 1")
         
         # 📄 Pagination parameters
         if extracted_data.get('limit'):
@@ -185,6 +240,71 @@ class JobSearchAgent(BaseAgent):
         
         logger.info(f"🔧 Built comprehensive search params: {params}")
         return params
+    
+    def _enhance_skills_from_job_title(self, extracted_data: Dict[str, Any]) -> str:
+        """Enhance skills based on job title if skills are not explicitly provided"""
+        job_title = extracted_data.get('job_title', '').lower()
+        existing_skills = extracted_data.get('skills', '')
+        is_internship = extracted_data.get('internship', False)
+        
+        # If skills are already provided, return them
+        if existing_skills:
+            return existing_skills
+        
+        # Auto-detect skills based on job title
+        skill_mapping = {
+            'android': 'Android, Java, Kotlin, Android Studio, XML, Gradle',
+            'ios': 'iOS, Swift, Objective-C, Xcode, CocoaPods, Core Data',
+            'react': 'React, JavaScript, TypeScript, HTML, CSS, Redux',
+            'angular': 'Angular, TypeScript, HTML, CSS, RxJS, Angular CLI',
+            'vue': 'Vue.js, JavaScript, HTML, CSS, Vuex, Vue Router',
+            'node': 'Node.js, JavaScript, Express, MongoDB, REST API',
+            'python': 'Python, Django, Flask, SQL, Git, REST API',
+            'java': 'Java, Spring Boot, Maven, Hibernate, SQL, JUnit',
+            'c#': 'C#, .NET, ASP.NET, SQL Server, Entity Framework',
+            'php': 'PHP, Laravel, MySQL, WordPress, Composer',
+            'data scientist': 'Python, R, SQL, Machine Learning, Statistics, Pandas',
+            'data analyst': 'SQL, Python, Excel, Tableau, Power BI, Statistics',
+            'machine learning': 'Python, TensorFlow, PyTorch, Scikit-learn, SQL, Statistics',
+            'devops': 'Docker, Kubernetes, AWS, CI/CD, Linux, Jenkins',
+            'cloud': 'AWS, Azure, GCP, Docker, Kubernetes, Terraform',
+            'ui/ux': 'Figma, Adobe XD, Sketch, Prototyping, User Research, Wireframing',
+            'product manager': 'Product Strategy, Agile, Scrum, Market Research, Analytics, JIRA',
+            'project manager': 'Project Management, Agile, Scrum, JIRA, Risk Management',
+            'sales': 'Sales, CRM, Communication, Negotiation, Lead Generation',
+            'marketing': 'Digital Marketing, SEO, Social Media, Google Ads, Analytics',
+            'content': 'Content Writing, SEO, Copywriting, Social Media, WordPress',
+            'frontend': 'HTML, CSS, JavaScript, React, Angular, Vue.js',
+            'backend': 'Python, Java, Node.js, SQL, REST API, Microservices',
+            'full stack': 'JavaScript, Python, React, Node.js, SQL, Git',
+            'mobile': 'React Native, Flutter, Android, iOS, JavaScript, Dart',
+            'blockchain': 'Solidity, Ethereum, Smart Contracts, Web3, JavaScript',
+            'cybersecurity': 'Network Security, Penetration Testing, SIEM, Firewall, Linux',
+            'qa': 'Selenium, TestNG, JUnit, Manual Testing, Automation, API Testing',
+            'database': 'SQL, MongoDB, PostgreSQL, MySQL, Redis, Database Design',
+            'system admin': 'Linux, Windows Server, Active Directory, Networking, PowerShell',
+            # Internship-specific mappings
+            'intern': 'Basic Programming, Problem Solving, Team Work, Communication',
+            'internship': 'Basic Programming, Problem Solving, Team Work, Communication',
+            'trainee': 'Basic Programming, Problem Solving, Team Work, Communication',
+            'graduate': 'Basic Programming, Problem Solving, Team Work, Communication'
+        }
+        
+        # Check for exact matches first
+        for keyword, skills in skill_mapping.items():
+            if keyword in job_title:
+                logger.info(f"🎯 Auto-detected skills for '{job_title}': {skills}")
+                return skills
+        
+        # Check for partial matches
+        for keyword, skills in skill_mapping.items():
+            if any(word in job_title for word in keyword.split()):
+                logger.info(f"🎯 Auto-detected skills for '{job_title}': {skills}")
+                return skills
+        
+        # If no specific skills found, return empty string
+        logger.info(f"⚠️ No specific skills auto-detected for job title: {job_title}")
+        return ""
     
     def _enhance_search_params(self, params: Dict[str, Any], routing_data: Dict[str, Any]) -> Dict[str, Any]:
         """Enhance search parameters with intelligent defaults and optimizations"""
@@ -368,7 +488,7 @@ class JobSearchAgent(BaseAgent):
                         parsed_params = json.loads(line)
                         logger.info(f"✅ Successfully parsed LLM parameters: {parsed_params}")
                         return parsed_params
-                
+               
                 # If no JSON line found, try to parse the entire response
                 if llm_response.strip().startswith('{') and llm_response.strip().endswith('}'):
                     parsed_params = json.loads(llm_response.strip())
@@ -460,3 +580,66 @@ class JobSearchAgent(BaseAgent):
         
         logger.info(f"🔄 Fallback parsing result: {params}")
         return params 
+    
+    async def search_jobs_follow_up(self, routing_data: Dict[str, Any], current_page: int = 1) -> Dict[str, Any]:
+        """Handle follow-up job searches with pagination"""
+        try:
+            token = routing_data.get('token', '')
+            base_url = routing_data.get('baseUrl', self.base_url)
+            session_id = routing_data.get('sessionId', 'default')
+            original_query = routing_data.get('originalQuery', '')
+            extracted_data = routing_data.get('extractedData', {})
+            
+            # Update search parameters for pagination
+            search_params = self._build_search_params(extracted_data, {}, {})
+            search_params['page'] = current_page
+            search_params['limit'] = 20  # Default limit for follow-up searches
+            
+            # Search for jobs using the JobMato API
+            job_search_result = await self.search_jobs_tool(token, base_url, **search_params)
+            
+            if not job_search_result.get('success'):
+                return self._handle_search_failure(original_query, extracted_data.get('language', 'english'))
+            
+            jobs_data = job_search_result.get('data', {})
+            jobs = jobs_data.get('jobs', [])
+            
+            if not jobs:
+                return {
+                    'type': 'plain_text',
+                    'content': 'No more jobs found. Try adjusting your search criteria.',
+                    'metadata': {'error': 'No more jobs', 'category': 'JOB_SEARCH'}
+                }
+            
+            # Format jobs for response
+            formatted_jobs = []
+            for job in jobs:
+                formatted_job = self.format_job_for_response(job)
+                formatted_jobs.append(formatted_job)
+            
+            # Create dynamic message for follow-up
+            total_jobs = len(formatted_jobs)
+            search_query = routing_data.get('searchQuery') or routing_data.get('originalQuery', 'default search')
+            
+            content = f"Here are {total_jobs} more job opportunities that might interest you:"
+            
+            return {
+                'type': 'job_card',
+                'content': content,
+                'metadata': {
+                    'jobs': formatted_jobs,
+                    'totalJobs': jobs_data.get('total', total_jobs),
+                    'isFollowUp': True,
+                    'hasMore': jobs_data.get('total', 0) > (current_page * search_params['limit']),
+                    'currentPage': current_page,
+                    'searchQuery': search_query,
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"Error in follow-up job search: {str(e)}")
+            return {
+                'type': 'plain_text',
+                'content': 'Sorry, there was an error loading more jobs. Please try again.',
+                'metadata': {'error': str(e), 'category': 'JOB_SEARCH'}
+            } 

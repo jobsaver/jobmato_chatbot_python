@@ -501,8 +501,8 @@ def handle_send_message(data):
                     # Retry sending message after session recovery
                     if data.get('message'):
                         socketio.start_background_task(lambda: retry_send_message(request, data))
-            return
-        
+                    return
+            
             raise Exception("Session not initialized. Please initialize chat first.")
         
         message = data.get('message', '')
@@ -615,6 +615,54 @@ def handle_ping():
         logger.debug(f"🏓 Ping-pong with client: {request.sid}")
     except Exception as e:
         logger.error(f"❌ Error handling ping: {str(e)}")
+
+@socketio.on('load_more_jobs')
+def handle_load_more_jobs(data):
+    """Handle request to load more jobs (pagination)"""
+    try:
+        user_id = get_user_id()
+        session_id = active_sessions.get(request.sid)
+        
+        if not user_id or not session_id:
+            raise Exception("User not authenticated or session not initialized")
+        
+        # Get pagination parameters
+        current_page = data.get('page', 1)
+        search_query = data.get('searchQuery', '')
+        
+        logger.info(f"📄 Loading more jobs for user {user_id}, page {current_page}")
+        
+        # Prepare routing data for follow-up search
+        routing_data = {
+            'token': get_user_data().get('token', ''),
+            'baseUrl': current_config.JOBMATO_API_BASE_URL,
+            'sessionId': session_id,
+            'originalQuery': search_query,
+            'searchQuery': search_query,
+            'extractedData': {
+                'query': search_query,
+                'page': current_page
+            }
+        }
+        
+        # Call follow-up job search
+        response = asyncio.run(chatbot.job_search_agent.search_jobs_follow_up(routing_data, current_page))
+        
+        if response:
+            handle_agent_response(request, response)
+        else:
+            emit(current_config.SOCKET_EVENTS['receive_message'], {
+                'content': 'No more jobs found. Try adjusting your search criteria.',
+                'type': 'plain_text',
+                'metadata': {'error': 'No more jobs'}
+            }, room=request.sid)
+    except Exception as e:
+        logger.error(f"❌ Error loading more jobs: {str(e)}")
+        emit(current_config.SOCKET_EVENTS['receive_message'], {
+            'content': 'Sorry, there was an error loading more jobs. Please try again.',
+            'type': 'plain_text',
+            'metadata': {'error': str(e)}
+        }, room=request.sid)
 
 def handle_career_response(socket, response):
     """Handle career advice responses"""
