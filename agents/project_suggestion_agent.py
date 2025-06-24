@@ -41,7 +41,7 @@ Always provide specific project ideas with:
 - Timeline estimates and milestones
 - Portfolio presentation tips
 
-Consider user's current skills, career goals, and conversation history for personalized recommendations."""
+Consider user's current skills, career goals, and conversation history for personalized recommendations. Give output in plain text."""
     
     async def suggest_projects(self, routing_data: Dict[str, Any]) -> Dict[str, Any]:
         """Suggest projects based on the routing data"""
@@ -90,20 +90,23 @@ Consider user's current skills, career goals, and conversation history for perso
             # Store conversation in memory for progressive suggestions
             if self.memory_manager:
                 await self.memory_manager.store_conversation(session_id, original_query, suggestions_response)
-            
-            return self.create_response(
-                'project_suggestions',
+
+            final =  self.create_response(
+                'plain_text',
                 suggestions_response,
                 {
                     'category': 'PROJECT_SUGGESTION',
                     'sessionId': session_id,
                     'language': extracted_data.get('language', 'english'),
                     'suggestion_type': self._classify_suggestion_type(original_query),
-                    'skill_level': self._determine_skill_level(profile_data, resume_data),
-                    'has_previous_suggestions': bool(conversation_context and 'project' in conversation_context.lower())
+                    'skillLevel': self._determine_skill_level(profile_data, resume_data),
+                    'has_previous_suggestions': bool(conversation_context and 'project' in conversation_context.lower()),
+                    "focusArea": None,
                 }
             )
             
+            return final
+        
         except Exception as e:
             logger.error(f"Error suggesting projects: {str(e)}")
             language = routing_data.get('extractedData', {}).get('language', 'english')
