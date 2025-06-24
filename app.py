@@ -1224,239 +1224,56 @@ def upload_resume_ui():
             'error': 'An unexpected error occurred during upload'
         }), 500
 
-# REST API endpoints for chat history management
-@app.route('/api/chat/sessions', methods=['GET'])
+@app.route('/api/sessions', methods=['GET'])
 def get_user_sessions_api():
-    """Get all chat sessions for the authenticated user"""
+    """Get paginated chat sessions for the authenticated user"""
     try:
-        # Extract user ID from token
         auth_header = request.headers.get('Authorization', '')
         if not auth_header.startswith('Bearer '):
-            return jsonify({'error': 'Authorization header required'}), 401
-        
+            return jsonify({'success': False, 'message': 'Authorization header required'}), 401
         token = auth_header.replace('Bearer ', '')
         payload = jwt.decode(token, options={"verify_signature": False})
         user_id = payload.get('id')
-        
         if not user_id:
-            return jsonify({'error': 'Invalid token'}), 401
-        
-        # Get sessions from memory manager
-        sessions = asyncio.run(chatbot.memory_manager.get_user_sessions(user_id))
-        
+            return jsonify({'success': False, 'message': 'Invalid token'}), 401
+        page = int(request.args.get('page', 1))
+        limit = int(request.args.get('limit', 10))
+        sessions = asyncio.run(chatbot.memory_manager.get_user_sessions(user_id, limit=1000))  # get all, paginate below
+        total = len(sessions)
+        start = (page - 1) * limit
+        end = start + limit
+        paginated = sessions[start:end]
         return jsonify({
             'success': True,
-            'sessions': sessions,
-            'count': len(sessions)
+            'sessions': paginated,
+            'page': page,
+            'limit': limit,
+            'total': total
         })
-        
-    except jwt.InvalidTokenError:
-        return jsonify({'error': 'Invalid token'}), 401
-    except Exception as e:
-        logger.error(f"❌ Error getting user sessions: {str(e)}")
-        return jsonify({'error': 'Internal server error'}), 500
+    except Exception as error:
+        return jsonify({'success': False, 'message': str(error)}), 500
 
-@app.route('/api/chat/sessions/<session_id>', methods=['GET'])
-def get_session_messages_api(session_id):
-    """Get all messages for a specific session"""
+@app.route('/api/history/<session_id>', methods=['GET'])
+def get_chat_history_api(session_id):
+    """Get chat history for a session (authenticated)"""
     try:
-        # Extract user ID from token
         auth_header = request.headers.get('Authorization', '')
         if not auth_header.startswith('Bearer '):
-            return jsonify({'error': 'Authorization header required'}), 401
-        
+            return jsonify({'success': False, 'message': 'Authorization header required'}), 401
         token = auth_header.replace('Bearer ', '')
         payload = jwt.decode(token, options={"verify_signature": False})
         user_id = payload.get('id')
-        
         if not user_id:
-            return jsonify({'error': 'Invalid token'}), 401
-        
-        # Validate session belongs to user
-        sessions = asyncio.run(chatbot.memory_manager.get_user_sessions(user_id))
-        session_exists = any(s['sessionId'] == session_id for s in sessions)
-        
-        if not session_exists:
-            return jsonify({'error': 'Session not found or access denied'}), 404
-        
-        # Get session messages
-        messages = asyncio.run(chatbot.memory_manager.get_all_messages(session_id))
-        
-        return jsonify({
-            'success': True,
-            'sessionId': session_id,
-            'messages': messages,
-            'count': len(messages)
-        })
-        
-    except jwt.InvalidTokenError:
-        return jsonify({'error': 'Invalid token'}), 401
-    except Exception as e:
-        logger.error(f"❌ Error getting session messages: {str(e)}")
-        return jsonify({'error': 'Internal server error'}), 500
-
-@app.route('/api/chat/sessions/<session_id>', methods=['DELETE'])
-def delete_session_api(session_id):
-    """Delete a specific session"""
-    try:
-        # Extract user ID from token
-        auth_header = request.headers.get('Authorization', '')
-        if not auth_header.startswith('Bearer '):
-            return jsonify({'error': 'Authorization header required'}), 401
-        
-        token = auth_header.replace('Bearer ', '')
-        payload = jwt.decode(token, options={"verify_signature": False})
-        user_id = payload.get('id')
-        
-        if not user_id:
-            return jsonify({'error': 'Invalid token'}), 401
-        
-        # Validate session belongs to user
-        sessions = asyncio.run(chatbot.memory_manager.get_user_sessions(user_id))
-        session_exists = any(s['sessionId'] == session_id for s in sessions)
-        
-        if not session_exists:
-            return jsonify({'error': 'Session not found or access denied'}), 404
-        
-        # Delete session
-        success = asyncio.run(chatbot.memory_manager.delete_session(session_id))
-        
-        if success:
-            return jsonify({
-                'success': True,
-                'message': 'Session deleted successfully'
-            })
-        else:
-            return jsonify({'error': 'Failed to delete session'}), 500
-        
-    except jwt.InvalidTokenError:
-        return jsonify({'error': 'Invalid token'}), 401
-    except Exception as e:
-        logger.error(f"❌ Error deleting session: {str(e)}")
-        return jsonify({'error': 'Internal server error'}), 500
-
-@app.route('/api/chat/sessions/<session_id>/title', methods=['PUT'])
-def update_session_title_api(session_id):
-    """Update the title of a session"""
-    try:
-        # Extract user ID from token
-        auth_header = request.headers.get('Authorization', '')
-        if not auth_header.startswith('Bearer '):
-            return jsonify({'error': 'Authorization header required'}), 401
-        
-        token = auth_header.replace('Bearer ', '')
-        payload = jwt.decode(token, options={"verify_signature": False})
-        user_id = payload.get('id')
-        
-        if not user_id:
-            return jsonify({'error': 'Invalid token'}), 401
-        
-        # Get title from request body
-        data = request.get_json()
-        title = data.get('title')
-        
-        if not title:
-            return jsonify({'error': 'Title is required'}), 400
-        
-        # Validate session belongs to user
-        sessions = asyncio.run(chatbot.memory_manager.get_user_sessions(user_id))
-        session_exists = any(s['sessionId'] == session_id for s in sessions)
-        
-        if not session_exists:
-            return jsonify({'error': 'Session not found or access denied'}), 404
-        
-        # Update title
-        success = asyncio.run(chatbot.memory_manager.update_session_title(session_id, title))
-        
-        if success:
-            return jsonify({
-                'success': True,
-                'message': 'Session title updated successfully',
-                'title': title
-            })
-        else:
-            return jsonify({'error': 'Failed to update session title'}), 500
-        
-    except jwt.InvalidTokenError:
-        return jsonify({'error': 'Invalid token'}), 401
-    except Exception as e:
-        logger.error(f"❌ Error updating session title: {str(e)}")
-        return jsonify({'error': 'Internal server error'}), 500
-
-@app.route('/api/chat/sessions/<session_id>/clear', methods=['POST'])
-def clear_session_messages_api(session_id):
-    """Clear all messages from a session"""
-    try:
-        # Extract user ID from token
-        auth_header = request.headers.get('Authorization', '')
-        if not auth_header.startswith('Bearer '):
-            return jsonify({'error': 'Authorization header required'}), 401
-        
-        token = auth_header.replace('Bearer ', '')
-        payload = jwt.decode(token, options={"verify_signature": False})
-        user_id = payload.get('id')
-        
-        if not user_id:
-            return jsonify({'error': 'Invalid token'}), 401
-        
-        # Validate session belongs to user
-        sessions = asyncio.run(chatbot.memory_manager.get_user_sessions(user_id))
-        session_exists = any(s['sessionId'] == session_id for s in sessions)
-        
-        if not session_exists:
-            return jsonify({'error': 'Session not found or access denied'}), 404
-        
-        # Clear session messages
-        asyncio.run(chatbot.memory_manager.clear_session(session_id))
-        
-        return jsonify({
-            'success': True,
-            'message': 'Session messages cleared successfully'
-        })
-        
-    except jwt.InvalidTokenError:
-        return jsonify({'error': 'Invalid token'}), 401
-    except Exception as e:
-        logger.error(f"❌ Error clearing session messages: {str(e)}")
-        return jsonify({'error': 'Internal server error'}), 500
-
-@app.route('/api/chat/sessions/<session_id>/context', methods=['GET'])
-def get_session_context_api(session_id):
-    """Get conversation context for agents (last 3 messages)"""
-    try:
-        # Extract user ID from token
-        auth_header = request.headers.get('Authorization', '')
-        if not auth_header.startswith('Bearer '):
-            return jsonify({'error': 'Authorization header required'}), 401
-        
-        token = auth_header.replace('Bearer ', '')
-        payload = jwt.decode(token, options={"verify_signature": False})
-        user_id = payload.get('id')
-        
-        if not user_id:
-            return jsonify({'error': 'Invalid token'}), 401
-        
-        # Validate session belongs to user
-        sessions = asyncio.run(chatbot.memory_manager.get_user_sessions(user_id))
-        session_exists = any(s['sessionId'] == session_id for s in sessions)
-        
-        if not session_exists:
-            return jsonify({'error': 'Session not found or access denied'}), 404
-        
-        # Get conversation context for agents
-        context = asyncio.run(chatbot.memory_manager.get_conversation_context_for_agents(session_id, limit=3))
-        
-        return jsonify({
-            'success': True,
-            'sessionId': session_id,
-            'context': context
-        })
-        
-    except jwt.InvalidTokenError:
-        return jsonify({'error': 'Invalid token'}), 401
-    except Exception as e:
-        logger.error(f"❌ Error getting session context: {str(e)}")
-        return jsonify({'error': 'Internal server error'}), 500
+            return jsonify({'success': False, 'message': 'Invalid token'}), 401
+        # Optionally: check session belongs to user
+        sessions = asyncio.run(chatbot.memory_manager.get_user_sessions(user_id, limit=1000))
+        session_ids = {s['sessionId'] for s in sessions}
+        if session_id not in session_ids:
+            return jsonify({'success': False, 'message': 'Session not found or access denied'}), 404
+        history = asyncio.run(chatbot.memory_manager.get_all_messages(session_id))
+        return jsonify({'success': True, 'data': history})
+    except Exception as error:
+        return jsonify({'success': False, 'message': str(error)}), 500
 
 if __name__ == '__main__':
     # Use SocketIO's run method instead of Flask's run method
