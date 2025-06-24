@@ -90,14 +90,18 @@ class JobSearchAgent(BaseAgent):
             if self.memory_manager:
                 await self.memory_manager.store_conversation(session_id, original_query, f"Found {total_jobs} jobs matching the search criteria")
 
+            # Get total available jobs from API response
+            total_available = jobs_data.get('total', total_jobs)
+            has_more = total_available > 5  # Show load more if more than 5 jobs available
+
             return {
                 'type': 'job_card',
                 'content': content,
                 'metadata': {
                     'jobs': formatted_jobs,
-                    'totalJobs': jobs_data.get('total', total_jobs),
+                    'totalJobs': total_available,
                     'isFollowUp': False,
-                    'hasMore': jobs_data.get('total', total_jobs) > total_jobs,
+                    'hasMore': has_more,
                     'currentPage': 1,
                     'searchQuery': search_query,
                 }
@@ -171,7 +175,7 @@ class JobSearchAgent(BaseAgent):
     def _build_search_params(self, extracted_data: Dict[str, Any], profile_data: Dict[str, Any], resume_data: Dict[str, Any]) -> Dict[str, Any]:
         """Build comprehensive search parameters from extracted data using JobMato Tools"""
         params = {
-            'limit': 20,  # Increased default limit
+            'limit': 5,  # Show only 5 jobs by default
             'page': 1
         }
         
@@ -593,7 +597,7 @@ class JobSearchAgent(BaseAgent):
             # Update search parameters for pagination
             search_params = self._build_search_params(extracted_data, {}, {})
             search_params['page'] = current_page
-            search_params['limit'] = 20  # Default limit for follow-up searches
+            search_params['limit'] = 5  # Keep consistent with initial search limit
             
             # Search for jobs using the JobMato API
             job_search_result = await self.search_jobs_tool(token, base_url, **search_params)
@@ -623,14 +627,18 @@ class JobSearchAgent(BaseAgent):
             
             content = f"Here are {total_jobs} more job opportunities that might interest you:"
             
+            # Calculate if there are more jobs available
+            total_available = jobs_data.get('total', 0)
+            has_more = total_available > (current_page * 5)  # Check if more than current page * 5
+            
             return {
                 'type': 'job_card',
                 'content': content,
                 'metadata': {
                     'jobs': formatted_jobs,
-                    'totalJobs': jobs_data.get('total', total_jobs),
+                    'totalJobs': total_available,
                     'isFollowUp': True,
-                    'hasMore': jobs_data.get('total', 0) > (current_page * search_params['limit']),
+                    'hasMore': has_more,
                     'currentPage': current_page,
                     'searchQuery': search_query,
                 }
