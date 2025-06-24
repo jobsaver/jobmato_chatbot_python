@@ -15,14 +15,14 @@ class BaseAgent(ABC, JobMatoToolsMixin):
         self.base_url = "https://backend-v1.jobmato.com"
         self.memory_manager = memory_manager
     
-    async def get_conversation_context(self, session_id: str, limit: int = 5) -> str:
-        """Get recent conversation history for context"""
+    async def get_conversation_context(self, session_id: str, limit: int = 3) -> str:
+        """Get recent conversation history for context (last 3 messages for agents)"""
         if not self.memory_manager:
             return ""
         
         try:
-            # Get last 5 messages for context using the memory manager
-            history = await self.memory_manager.get_conversation_history(session_id, limit=limit)
+            # Get last 3 messages for context using the memory manager
+            history = await self.memory_manager.get_conversation_context_for_agents(session_id, limit=limit)
             if not history:
                 return ""
             

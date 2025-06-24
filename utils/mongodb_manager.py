@@ -51,6 +51,7 @@ class MongoDBManager:
             self.collection.create_index("sessionId", unique=True, sparse=True)
             self.collection.create_index("userId", sparse=True)
             self.collection.create_index("updatedAt", sparse=True)
+            self.collection.create_index([("userId", 1), ("updatedAt", -1)])  # For user sessions query
             logger.info("📊 MongoDB indexes created successfully")
         except Exception as e:
             logger.warning(f"⚠️ Could not create indexes: {str(e)}")
@@ -113,6 +114,97 @@ class MongoDBManager:
             logger.error(f"❌ Error getting last n messages: {str(e)}")
             return []
     
+    async def get_all_messages(self, session_id: str) -> List[Dict[str, Any]]:
+        """Get all messages for a session"""
+        if not self.connected:
+            logger.warning("MongoDB not connected, attempting to reconnect...")
+            self._connect()
+            if not self.connected:
+                return []
+        
+        try:
+            session = self.collection.find_one({'sessionId': session_id}, {'messages': 1})
+            if session and 'messages' in session:
+                return session['messages']
+            return []
+            
+        except Exception as e:
+            logger.error(f"❌ Error getting all messages: {str(e)}")
+            return []
+    
+    async def get_user_sessions(self, user_id: str, limit: int = 20) -> List[Dict[str, Any]]:
+        """Get all sessions for a user, ordered by most recent"""
+        if not self.connected:
+            logger.warning("MongoDB not connected, attempting to reconnect...")
+            self._connect()
+            if not self.connected:
+                return []
+        
+        try:
+            cursor = self.collection.find(
+                {'userId': user_id},
+                {
+                    'sessionId': 1,
+                    'title': 1,
+                    'createdAt': 1,
+                    'updatedAt': 1,
+                    'messageCount': {'$size': '$messages'}
+                }
+            ).sort('updatedAt', DESCENDING).limit(limit)
+            
+            sessions = []
+            for session in cursor:
+                sessions.append({
+                    'sessionId': session.get('sessionId'),
+                    'title': session.get('title', 'New Chat'),
+                    'createdAt': session.get('createdAt'),
+                    'updatedAt': session.get('updatedAt'),
+                    'messageCount': session.get('messageCount', 0)
+                })
+            
+            return sessions
+            
+        except Exception as e:
+            logger.error(f"❌ Error getting user sessions: {str(e)}")
+            return []
+    
+    async def update_session_title(self, session_id: str, title: str) -> bool:
+        """Update the title of a session"""
+        if not self.connected:
+            logger.warning("MongoDB not connected, attempting to reconnect...")
+            self._connect()
+            if not self.connected:
+                return False
+        
+        try:
+            result = self.collection.update_one(
+                {'sessionId': session_id},
+                {'$set': {'title': title, 'updatedAt': datetime.utcnow()}}
+            )
+            logger.info(f"📝 Updated session title for {session_id}: {title}")
+            return result.modified_count > 0
+            
+        except Exception as e:
+            logger.error(f"❌ Error updating session title: {str(e)}")
+            return False
+    
+    async def delete_session(self, session_id: str) -> bool:
+        """Delete a session and all its messages"""
+        if not self.connected:
+            logger.warning("MongoDB not connected, attempting to reconnect...")
+            self._connect()
+            if not self.connected:
+                return False
+        
+        try:
+            result = self.collection.delete_one({'sessionId': session_id})
+            logger.info(f"🗑️ Deleted session {session_id}")
+            return result.deleted_count > 0
+            
+        except Exception as e:
+            logger.error(f"❌ Error deleting session: {str(e)}")
+            return False
+    
     async def get_formatted_history(self, session_id: str, limit: int = 5) -> str:
         """Get formatted conversation history as string (last n messages)"""
         messages = await self.get_last_n_messages(session_id, limit)
@@ -124,6 +216,24 @@ class MongoDBManager:
         for msg in messages:
             role = msg.get('role', 'user')
             content = msg.get('content', '')
+            formatted_history.append(f"{role.capitalize()}: {content}")
+        
+        return "\n".join(formatted_history)
+    
+    async def get_conversation_context_for_agents(self, session_id: str, limit: int = 3) -> str:
+        """Get conversation context specifically formatted for agents (last 3 messages)"""
+        messages = await self.get_last_n_messages(session_id, limit)
+        
+        if not messages:
+            return ""
+        
+        formatted_history = []
+        for msg in messages:
+            role = msg.get('role', 'user')
+            content = msg.get('content', '')
+            # Truncate very long messages to keep context manageable
+            if len(content) > 200:
+                content = content[:200] + "..."
             formatted_history.append(f"{role.capitalize()}: {content}")
         
         return "\n".join(formatted_history)
