@@ -380,14 +380,34 @@ class JobSearchAgent(BaseAgent):
         if extracted_data.get('salary_max') is not None:
             params['salary_max'] = extracted_data['salary_max']
         
-        # 🎓 Internship filter
+        # 🎓 Internship filter - IMPROVED LOGIC
+        # Only set internship if explicitly requested AND user doesn't have substantial skills
         if extracted_data.get('internship') is not None:
-            params['internship'] = extracted_data['internship']
-            # If internship is true, set appropriate defaults
-            if extracted_data['internship']:
+            # Check if user has substantial technical skills that suggest they're beyond internship level
+            has_substantial_skills = self._has_substantial_technical_skills(extracted_data, profile_data, resume_data)
+            
+            if extracted_data['internship'] and not has_substantial_skills:
+                params['internship'] = True
                 params['job_type'] = 'internship'
                 params['experience_max'] = 1  # Max 1 year for internships
-                logger.info(f"🎓 Detected internship search, setting job_type: internship, experience_max: 1")
+                logger.info(f"🎓 Detected internship search for entry-level user, setting job_type: internship")
+            elif extracted_data['internship'] and has_substantial_skills:
+                # User has substantial skills but requested internship - this might be for career transition
+                params['internship'] = True
+                params['job_type'] = 'internship'
+                logger.info(f"🎓 User with substantial skills requested internship (possible career transition)")
+            else:
+                # Not an internship request - focus on full-time positions
+                params['internship'] = False
+                params['job_type'] = 'full-time'
+                logger.info(f"💼 Focusing on full-time positions for user with substantial skills")
+        else:
+            # No explicit internship request - check if we should default to full-time based on skills
+            has_substantial_skills = self._has_substantial_technical_skills(extracted_data, profile_data, resume_data)
+            if has_substantial_skills:
+                params['internship'] = False
+                params['job_type'] = 'full-time'
+                logger.info(f"💼 Defaulting to full-time positions for user with substantial skills")
         
         # 📄 Pagination parameters
         if extracted_data.get('limit'):
@@ -397,6 +417,69 @@ class JobSearchAgent(BaseAgent):
         
         logger.info(f"🔧 Built comprehensive search params: {params}")
         return params
+    
+    def _has_substantial_technical_skills(self, extracted_data: Dict[str, Any], profile_data: Dict[str, Any], resume_data: Dict[str, Any]) -> bool:
+        """Check if user has substantial technical skills that suggest they're beyond internship level"""
+        # Define substantial technical skills that indicate professional experience
+        substantial_skills = [
+            'java', 'kotlin', 'android', 'react', 'node.js', 'python', 'javascript', 'typescript',
+            'mongodb', 'mysql', 'aws', 'docker', 'kubernetes', 'git', 'spring', 'django', 'flask',
+            'express', 'angular', 'vue', 'php', 'c#', 'c++', 'go', 'rust', 'swift', 'objective-c',
+            'tensorflow', 'pytorch', 'machine learning', 'data science', 'devops', 'cloud',
+            'microservices', 'rest api', 'graphql', 'sql', 'nosql', 'redis', 'elasticsearch'
+        ]
+        
+        # Check skills from extracted data
+        skills_text = extracted_data.get('skills', '').lower()
+        if skills_text:
+            found_skills = [skill for skill in substantial_skills if skill in skills_text]
+            if len(found_skills) >= 3:  # At least 3 substantial skills
+                logger.info(f"🎯 Found substantial skills in extracted data: {found_skills}")
+                return True
+        
+        # Check skills from profile data
+        if profile_data and not profile_data.get('error'):
+            profile_skills = str(profile_data.get('skills', '')).lower()
+            if profile_skills:
+                found_skills = [skill for skill in substantial_skills if skill in profile_skills]
+                if len(found_skills) >= 3:
+                    logger.info(f"🎯 Found substantial skills in profile data: {found_skills}")
+                    return True
+        
+        # Check skills from resume data
+        if resume_data and not resume_data.get('error'):
+            resume_skills = str(resume_data.get('skills', '')).lower()
+            if resume_skills:
+                found_skills = [skill for skill in substantial_skills if skill in resume_skills]
+                if len(found_skills) >= 3:
+                    logger.info(f"🎯 Found substantial skills in resume data: {found_skills}")
+                    return True
+        
+        # Check for experience indicators
+        experience_indicators = ['experience', 'senior', 'lead', 'architect', 'manager', 'developer', 'engineer']
+        
+        # Check in extracted data
+        query_text = extracted_data.get('query', '').lower()
+        if any(indicator in query_text for indicator in experience_indicators):
+            logger.info(f"🎯 Found experience indicators in query: {query_text}")
+            return True
+        
+        # Check in profile data
+        if profile_data and not profile_data.get('error'):
+            profile_text = str(profile_data).lower()
+            if any(indicator in profile_text for indicator in experience_indicators):
+                logger.info(f"🎯 Found experience indicators in profile data")
+                return True
+        
+        # Check in resume data
+        if resume_data and not resume_data.get('error'):
+            resume_text = str(resume_data).lower()
+            if any(indicator in resume_text for indicator in experience_indicators):
+                logger.info(f"🎯 Found experience indicators in resume data")
+                return True
+        
+        logger.info(f"⚠️ User appears to be entry-level, suitable for internships")
+        return False
     
     def _enhance_skills_from_job_title(self, extracted_data: Dict[str, Any]) -> str:
         """Enhance skills based on job title if skills are not explicitly provided"""
@@ -958,16 +1041,42 @@ class JobSearchAgent(BaseAgent):
             essential_params['salary_min'] = broader_min
             essential_params['salary_max'] = broader_max
         
-        # Keep internship boolean if present
+        # IMPROVED: Handle internship filter more intelligently
+        # Check if user has substantial skills before defaulting to internships
+        has_substantial_skills = self._has_substantial_technical_skills(extracted_data, {}, {})
+        
         if extracted_data.get('internship') is not None:
-            essential_params['internship'] = extracted_data['internship']
-            if extracted_data['internship']:
+            if extracted_data['internship'] and not has_substantial_skills:
+                # User explicitly requested internship and has entry-level skills
+                essential_params['internship'] = True
                 essential_params['job_type'] = 'internship'
                 essential_params['experience_max'] = 1
+                logger.info(f"🔄 Broader search: User requested internship with entry-level skills")
+            elif extracted_data['internship'] and has_substantial_skills:
+                # User requested internship but has substantial skills (career transition)
+                essential_params['internship'] = True
+                essential_params['job_type'] = 'internship'
+                logger.info(f"🔄 Broader search: User with substantial skills requested internship")
+            else:
+                # Not an internship request - focus on full-time positions
+                essential_params['internship'] = False
+                essential_params['job_type'] = 'full-time'
+                logger.info(f"🔄 Broader search: Focusing on full-time positions")
+        else:
+            # No explicit internship request - default based on skills
+            if has_substantial_skills:
+                essential_params['internship'] = False
+                essential_params['job_type'] = 'full-time'
+                logger.info(f"🔄 Broader search: Defaulting to full-time for user with substantial skills")
+            else:
+                # Entry-level user, allow both internship and full-time
+                essential_params.pop('internship', None)  # Remove internship filter to get both types
+                essential_params.pop('job_type', None)
+                logger.info(f"🔄 Broader search: Entry-level user - allowing both internship and full-time positions")
         
         # If we have a query but no specific job title, use it
         if extracted_data.get('query') and not extracted_data.get('job_title'):
             essential_params['query'] = extracted_data['query']
         
-        logger.info(f"🔄 Built broader search params (no job_title, with skills): {essential_params}")
+        logger.info(f"🔄 Built broader search params: {essential_params}")
         return essential_params 

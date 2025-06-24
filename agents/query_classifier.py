@@ -82,8 +82,18 @@ SKILL EXTRACTION RULES for JOB_SEARCH:
 9. For job titles like "Sales Executive" → add skills: "Sales, CRM, Communication, Negotiation, Lead Generation"
 10. For job titles like "Content Writer" → add skills: "Content Writing, SEO, Copywriting, Social Media, WordPress"
 
+RESUME-BASED JOB SEARCH RULES:
+1. When user asks for jobs "according to my resume" or "based on my resume" → set internship: false (unless explicitly mentioned) in hindi english or any language
+2. When user asks for jobs "matching my profile" or "suitable for my skills" → set internship: false (unless explicitly mentioned) in hindi english or any language
+3. When user asks for "jobs for my experience level" → set internship: false (unless explicitly mentioned)
+4. These queries indicate the user wants full-time positions matching their professional background
+5. Examples:
+   - "suggest me jobs according my resume" → internship: false, focus on full-time positions
+   - "jobs based on my profile" → internship: false, focus on full-time positions
+   - "recommend jobs for my skills" → internship: false, focus on full-time positions
+
 INTERNSHIP DETECTION RULES:
-1. Set internship: true for queries containing: "intern", "internship", "trainee", "graduate", "student", "summer intern", "winter intern"
+1. Set internship: true ONLY for queries containing: "intern", "internship", "trainee", "graduate", "student", "summer intern", "winter intern"
 2. Set internship: true for queries like: "internship opportunities", "student jobs", "graduate positions"
 3. Set job_type: "internship" when internship: true
 4. Set experience_max: 1 when internship: true (max 1 year for internships)
@@ -92,6 +102,8 @@ INTERNSHIP DETECTION RULES:
    - "Summer intern positions" → internship: true, job_type: "internship"
    - "Graduate trainee jobs" → internship: true, job_type: "internship"
    - "Student developer positions" → internship: true, job_type: "internship"
+   - "suggest me jobs according my resume" → internship: false (resume-based search)
+   - "jobs based on my profile" → internship: false (profile-based search)
 
 EXAMPLES:
 - Query: "Android jobs" → skills: "Android, Java, Kotlin, Android Studio, XML"
@@ -102,6 +114,8 @@ EXAMPLES:
 - Query: "Android internship" → internship: true, job_type: "internship", skills: "Android, Java, Kotlin, Android Studio, XML"
 - Query: "Summer intern positions" → internship: true, job_type: "internship"
 - Query: "Graduate trainee jobs" → internship: true, job_type: "internship"
+- Query: "suggest me jobs according my resume" → internship: false, focus on full-time positions matching resume skills
+- Query: "jobs based on my profile" → internship: false, focus on full-time positions matching profile skills
 
 Extract relevant parameters based on the category. Be precise and only extract explicitly mentioned information. For JOB_SEARCH, always try to extract 'job_title' and reformulate a concise 'searchQuery' if applicable. If a parameter is not explicitly mentioned, omit it from extractedData."""
     
