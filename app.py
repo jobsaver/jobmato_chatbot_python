@@ -83,72 +83,58 @@ except Exception as e:
 connected_users = {}  # socket_id -> user_id
 active_sessions = {}  # socket_id -> session_id
 user_sessions = {}    # user_id -> set of session_ids
+user_data_store = {}  # socket_id -> user_data
 
-def ws_authenticate(socket, callback):
+def ws_authenticate(callback):
     """WebSocket authentication middleware"""
     try:
-        # Get token from query parameters or headers
         token = request.args.get('token') or request.headers.get('Authorization', '').replace('Bearer ', '')
-        
         if not token:
-            logger.warning(f"❌ No token provided for socket {socket.id}")
             callback(Exception(current_config.ERROR_CODES['AUTH_FAILED']))
             return
-        
-        # Verify JWT token
         try:
-            # Use JWT secret from config
             payload = jwt.decode(token, options={"verify_signature": False})
             user_id = payload.get('id')
-            
             if not user_id:
                 raise Exception("Invalid token payload")
-            
-            # Store user data in socket
-            socket.user_data = {
+            # Store user data in global dictionary
+            user_data_store[request.sid] = {
                 'id': user_id,
                 'email': payload.get('email'),
                 'token': token
             }
-            
-            logger.info(f"✅ Authenticated user {user_id} for socket {socket.id}")
+            logger.info(f"✅ Authenticated user {user_id} for socket {request.sid}")
             callback(None)
-            
         except jwt.InvalidTokenError as e:
-            logger.error(f"❌ Invalid JWT token for socket {socket.id}: {str(e)}")
+            logger.error(f"❌ Invalid JWT token for socket {request.sid}: {str(e)}")
             callback(Exception(current_config.ERROR_CODES['INVALID_TOKEN']))
-            
     except Exception as e:
-        logger.error(f"❌ Authentication error for socket {socket.id}: {str(e)}")
+        logger.error(f"❌ Authentication error for socket {request.sid}: {str(e)}")
         callback(e)
 
-def get_user_id(socket):
-    """Get user ID from socket"""
-    return getattr(socket, 'user_data', {}).get('id')
+def get_user_id():
+    """Get user ID from global storage"""
+    return user_data_store.get(request.sid, {}).get('id')
+
+def get_user_data():
+    """Get full user data from global storage"""
+    return user_data_store.get(request.sid, {})
 
 def store_user_session(user_id: str, socket_id: str):
-    """Store user session in Redis"""
     if not redis_client:
         return
-    
     try:
-        # Store user session with expiration
         redis_client.hset(f"user_sessions:{user_id}", "socketId", socket_id)
         redis_client.hset(f"user_sessions:{user_id}", "connectedAt", datetime.now().isoformat())
         redis_client.expire(f"user_sessions:{user_id}", current_config.SESSION_TIMEOUT_HOURS * 3600)
-        
-        # Store socket to user mapping
         redis_client.set(f"socket_user:{socket_id}", user_id, current_config.SESSION_TIMEOUT_HOURS * 3600)
-        
         logger.info(f"💾 Stored user session in Redis: {user_id} -> {socket_id}")
     except Exception as e:
         logger.error(f"❌ Failed to store user session in Redis: {str(e)}")
 
 def get_user_session_from_redis(user_id: str) -> Optional[str]:
-    """Get user session from Redis"""
     if not redis_client:
         return None
-    
     try:
         return redis_client.hget(f"user_sessions:{user_id}", "socketId")
     except Exception as e:
@@ -156,23 +142,18 @@ def get_user_session_from_redis(user_id: str) -> Optional[str]:
         return None
 
 def broadcast_to_user(user_id: str, event: str, data: dict):
-    """Broadcast message to all user's sockets"""
     try:
-        # Try to get user's current socket from Redis
         socket_id = get_user_session_from_redis(user_id)
         if socket_id:
             socketio.emit(event, data, room=socket_id)
         else:
-            # Fallback to room-based broadcasting
             socketio.emit(event, data, room=user_id)
     except Exception as e:
         logger.error(f"❌ Error broadcasting to user {user_id}: {str(e)}")
 
 def broadcast_typing_status(user_id: str, is_typing: bool):
-    """Broadcast typing status to all user's sockets"""
     try:
         logger.info(f"📝 Broadcasting typing status for user {user_id}: {is_typing}")
-        
         broadcast_to_user(user_id, current_config.SOCKET_EVENTS['typing_status'], {
             'isTyping': is_typing,
             'timestamp': datetime.now().isoformat()
@@ -180,27 +161,22 @@ def broadcast_typing_status(user_id: str, is_typing: bool):
     except Exception as e:
         logger.error(f"❌ Error broadcasting typing status: {str(e)}")
 
-def handle_error(socket, error_type: str, error: Exception, session_id: str = None):
-    """Handle and emit errors"""
+def handle_error(error_type: str, error: Exception, session_id: str = None):
     logger.error(f"❌ {error_type}: {str(error)}")
-    
     error_message = str(error) if isinstance(error, Exception) else "An error occurred"
     error_code = current_config.ERROR_CODES.get(error_type.upper(), error_type.upper())
-    
-    socket.emit(current_config.SOCKET_EVENTS['error'], {
+    emit(current_config.SOCKET_EVENTS['error'], {
         'type': error_type,
         'code': error_code,
         'message': error_message,
         'sessionId': session_id,
         'timestamp': datetime.now().isoformat()
-    })
-    
-    # Also emit to specific error channel
-    socket.emit(error_type, {
+    }, room=request.sid)
+    emit(error_type, {
         'error': True,
         'message': error_message,
         'code': error_code
-    })
+    }, room=request.sid)
 
 class JobMatoChatBot:
     def __init__(self):
@@ -348,67 +324,50 @@ chatbot = JobMatoChatBot()
 
 # WebSocket event handlers with enhanced functionality
 @socketio.on(current_config.SOCKET_EVENTS['connect'])
-def handle_connect():
-    """Handle client connection with authentication"""
+def handle_connect(auth=None):
     logger.info(f"👤 Client connected: {request.sid}")
-    
-    # Authenticate the connection
-    ws_authenticate(request, lambda err: handle_auth_result(request, err))
+    ws_authenticate(lambda err: handle_auth_result(err))
 
-def handle_auth_result(socket, error):
-    """Handle authentication result"""
+def handle_auth_result(error):
     if error:
-        logger.error(f"❌ Authentication failed for socket {socket.id}: {str(error)}")
-        socket.emit('auth_error', {
+        logger.error(f"❌ Authentication failed for socket {request.sid}: {str(error)}")
+        emit('auth_error', {
             'message': str(error),
             'code': current_config.ERROR_CODES['AUTH_FAILED']
-        })
-        # Disconnect unauthenticated socket after delay
-        socketio.start_background_task(lambda: disconnect_unauthorized(socket))
+        }, room=request.sid)
+        disconnect()
     else:
-        user_id = get_user_id(socket)
+        user_id = get_user_id()
         if user_id:
-            # Store user session
-            store_user_session(user_id, socket.id)
-            
-            # Update global mappings
-            connected_users[socket.id] = user_id
-            
-            socket.emit(current_config.SOCKET_EVENTS['auth_status'], {
+            store_user_session(user_id, request.sid)
+            connected_users[request.sid] = user_id
+            emit(current_config.SOCKET_EVENTS['auth_status'], {
                 'authenticated': True,
                 'userId': user_id,
-                'socketId': socket.id
-            })
-            
-            # Notify about available agents
-            socket.emit('available_agents', {
+                'socketId': request.sid
+            }, room=request.sid)
+            emit('available_agents', {
                 'availableAgents': list(current_config.AGENT_TYPES.keys()),
                 'message': 'These agent types are available for your queries'
-            })
-            
+            }, room=request.sid)
             logger.info(f"✅ User {user_id} authenticated successfully")
         else:
-            logger.error(f"❌ No user ID found for authenticated socket {socket.id}")
+            logger.error(f"❌ No user ID found for authenticated socket {request.sid}")
 
-def disconnect_unauthorized(socket):
-    """Disconnect unauthorized socket after delay"""
+def disconnect_unauthorized():
     import time
     time.sleep(5)
-    if not get_user_id(socket):
-        socket.disconnect(True)
+    if not get_user_id():
+        disconnect()
 
 @socketio.on(current_config.SOCKET_EVENTS['disconnect'])
 def handle_disconnect():
-    """Handle client disconnection with cleanup"""
-    user_id = get_user_id(request)
+    user_id = get_user_id()
     session_id = active_sessions.get(request.sid)
-    
     logger.info(f"👋 Client disconnected: {request.sid}", {
         'userId': user_id,
         'sessionId': session_id
     })
-    
-    # Clean up Redis data
     if user_id and redis_client:
         try:
             redis_client.hdel(f"user_sessions:{user_id}", "socketId")
@@ -416,16 +375,15 @@ def handle_disconnect():
             logger.info(f"🧹 Cleaned up Redis session data for user: {user_id}")
         except Exception as e:
             logger.error(f"❌ Failed to clean up Redis session data: {str(e)}")
-    
-    # Clean up local mappings
     connected_users.pop(request.sid, None)
     active_sessions.pop(request.sid, None)
+    user_data_store.pop(request.sid, None)  # Clean up user data
 
 @socketio.on(current_config.SOCKET_EVENTS['init_chat'])
 def handle_init_chat(data):
     """Initialize a new chat session or load existing with enhanced error handling"""
     try:
-        user_id = get_user_id(request)
+        user_id = get_user_id()
         if not user_id:
             raise Exception("User not authenticated")
         
@@ -483,15 +441,15 @@ def handle_init_chat(data):
             'timestamp': datetime.now().isoformat()
         }
         
-        request.emit(current_config.SOCKET_EVENTS['session_status'], response)
-        request.emit('init_response', response)
+        emit(current_config.SOCKET_EVENTS['session_status'], response, room=request.sid)
+        emit('init_response', response, room=request.sid)
         
         # Send welcome message
         try:
             welcome_data = {
                 'chatInput': 'Hello',
                 'sessionId': session_id,
-                'token': getattr(request, 'user_data', {}).get('token', ''),
+                'token': get_user_data().get('token', ''),
                 'baseUrl': current_config.JOBMATO_API_BASE_URL
             }
             welcome_response = asyncio.run(chatbot.process_message(welcome_data))
@@ -508,14 +466,14 @@ def handle_init_chat(data):
             'timestamp': datetime.now().isoformat()
         }
         
-        request.emit(current_config.SOCKET_EVENTS['session_status'], error_response)
-        handle_error(request, 'init_error', e)
+        emit(current_config.SOCKET_EVENTS['session_status'], error_response, room=request.sid)
+        handle_error('init_error', e)
 
 @socketio.on(current_config.SOCKET_EVENTS['send_message'])
 def handle_send_message(data):
     """Handle incoming chat messages with enhanced error handling and recovery"""
     try:
-        user_id = get_user_id(request)
+        user_id = get_user_id()
         session_id = active_sessions.get(request.sid)
         
         logger.info(f"💬 Processing message: '{data.get('message', '')}' for session {session_id}, user {user_id}")
@@ -570,7 +528,7 @@ def handle_send_message(data):
         request_data = {
             'chatInput': message,
             'sessionId': session_id,
-            'token': getattr(request, 'user_data', {}).get('token', ''),
+            'token': get_user_data().get('token', ''),
             'baseUrl': current_config.JOBMATO_API_BASE_URL
         }
         
@@ -605,19 +563,19 @@ def handle_send_message(data):
         logger.error(f"❌ Error in handle_send_message: {str(e)}")
         
         # Always stop typing indicator on error
-        user_id = get_user_id(request)
+        user_id = get_user_id()
         if user_id:
             broadcast_typing_status(user_id, False)
         
         # Send user-friendly error message
-        request.emit(current_config.SOCKET_EVENTS['receive_message'], {
+        emit(current_config.SOCKET_EVENTS['receive_message'], {
             'content': "I'm sorry, I encountered an issue processing your request. Please try again or start a new session if the problem persists.",
             'type': current_config.RESPONSE_TYPES['plain_text'],
             'metadata': {
                 'error': True,
                 'errorType': 'processing_error'
             }
-        })
+        }, room=request.sid)
 
 def retry_send_message(socket, data):
     """Retry sending message after session recovery"""
@@ -629,7 +587,7 @@ def retry_send_message(socket, data):
 def handle_typing_status(data):
     """Handle typing status with broadcasting to all user sockets"""
     try:
-        user_id = get_user_id(request)
+        user_id = get_user_id()
         if user_id:
             is_typing = data.get('isTyping', False)
             broadcast_typing_status(user_id, is_typing)
@@ -645,15 +603,15 @@ def handle_get_chat_history():
             raise Exception("No active session")
         
         history = asyncio.run(chatbot.memory_manager.get_conversation_history(session_id))
-        request.emit(current_config.SOCKET_EVENTS['chat_history'], {'messages': history})
+        emit(current_config.SOCKET_EVENTS['chat_history'], {'messages': history}, room=request.sid)
     except Exception as e:
-        handle_error(request, 'history_error', e)
+        handle_error('history_error', e)
 
 @socketio.on(current_config.SOCKET_EVENTS['ping'])
 def handle_ping():
     """Connection health check"""
     try:
-        request.emit(current_config.SOCKET_EVENTS['pong'])
+        emit(current_config.SOCKET_EVENTS['pong'], room=request.sid)
         logger.debug(f"🏓 Ping-pong with client: {request.sid}")
     except Exception as e:
         logger.error(f"❌ Error handling ping: {str(e)}")
@@ -661,7 +619,7 @@ def handle_ping():
 def handle_career_response(socket, response):
     """Handle career advice responses"""
     if not response or not response.get('content'):
-        handle_error(socket, 'response_error', Exception("Invalid career response"))
+        handle_error('response_error', Exception("Invalid career response"))
         return
     
     logger.info("🎯 Processing career response:", {
@@ -674,16 +632,16 @@ def handle_career_response(socket, response):
     suggestions = response.get('metadata', {}).get('suggestions', [])
     formatted_response = format_career_suggestions(suggestions) if suggestions else response.get('content')
     
-    socket.emit(current_config.SOCKET_EVENTS['receive_message'], {
+    emit(current_config.SOCKET_EVENTS['receive_message'], {
         'content': formatted_response,
         'type': 'career_advice',
         'metadata': response.get('metadata', {})
-    })
+    }, room=request.sid)
 
 def handle_agent_response(socket, response):
     """Handle agent responses with enhanced job card support"""
     if not response or not response.get('content'):
-        handle_error(socket, 'response_error', Exception("Invalid response from agent"))
+        handle_error('response_error', Exception("Invalid response from agent"))
         return
     
     content = response.get('content')
@@ -692,7 +650,7 @@ def handle_agent_response(socket, response):
     
     # Enhanced job card handling
     if response_type == 'job_card' and metadata.get('jobs'):
-        session_id = active_sessions.get(socket.id)
+        session_id = active_sessions.get(request.sid)
         if session_id and redis_client:
             try:
                 # Cache jobs and metadata for session replay
@@ -702,7 +660,7 @@ def handle_agent_response(socket, response):
                 logger.warn(f"⚠️ Failed to cache job data: {str(e)}")
     
     # Always emit through receive_message with consistent format
-    socket.emit(current_config.SOCKET_EVENTS['receive_message'], {
+    emit(current_config.SOCKET_EVENTS['receive_message'], {
         'content': content,
         'type': response_type,
         'metadata': {
@@ -710,7 +668,7 @@ def handle_agent_response(socket, response):
             # For job cards, ensure jobs array is always present
             **({'jobs': metadata.get('jobs', []), 'totalJobs': metadata.get('totalJobs', len(metadata.get('jobs', [])))} if response_type == 'job_card' else {})
         }
-    })
+    }, room=request.sid)
 
 def format_career_suggestions(suggestions):
     """Format career suggestions for display"""
@@ -798,7 +756,7 @@ def handle_join_session(data):
     session_id = data.get('session_id', request.sid)
     join_room(session_id)
     logger.info(f"🏠 Client {request.sid} joined session: {session_id}")
-    request.emit('session_joined', {'session_id': session_id}, room=session_id)
+    emit('session_joined', {'session_id': session_id}, room=session_id)
 
 @socketio.on('leave_session')
 def handle_leave_session(data):
@@ -823,19 +781,19 @@ def handle_clear_session(data):
                 success = asyncio.run(chatbot.memory_manager.clear_session(session_id))
                 
                 if success:
-                    socketio.emit(current_config.SOCKET_EVENTS['session_cleared'], {
+                    emit(current_config.SOCKET_EVENTS['session_cleared'], {
                         'message': 'Session history cleared successfully',
                         'session_id': session_id
                     }, room=session_id)
                 else:
-                    socketio.emit(current_config.SOCKET_EVENTS['error'], {
+                    emit(current_config.SOCKET_EVENTS['error'], {
                         'message': 'Failed to clear session history',
                         'session_id': session_id
                     }, room=session_id)
                 
             except Exception as e:
                 logger.error(f"❌ Error clearing session: {str(e)}")
-                socketio.emit(current_config.SOCKET_EVENTS['error'], {
+                emit(current_config.SOCKET_EVENTS['error'], {
                     'message': 'Error clearing session',
                     'error': str(e)
                 }, room=session_id)
@@ -844,7 +802,7 @@ def handle_clear_session(data):
         
     except Exception as e:
         logger.error(f"❌ Error handling clear session: {str(e)}")
-        request.emit(current_config.SOCKET_EVENTS['error'], {'message': 'Error processing clear request', 'error': str(e)})
+        emit(current_config.SOCKET_EVENTS['error'], {'message': 'Error processing clear request', 'error': str(e)})
 
 @app.route('/')
 def index():
