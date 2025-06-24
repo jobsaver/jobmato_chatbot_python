@@ -11,30 +11,32 @@ class JobSearchAgent(BaseAgent):
     def __init__(self, memory_manager=None):
         super().__init__(memory_manager)
         self.llm_client = LLMClient()
-        self.system_message = """You are the JobMato Job Search Assistant, specialized in helping users find relevant job opportunities. You can understand and respond in English, Hindi, and Hinglish naturally.
+        self.system_message = """
+        You are the JobMato Job Search Assistant, specialized in helping users find relevant job opportunities. You can understand and respond in English, Hindi, and Hinglish naturally.
 
-PERSONALITY TRAITS:
-- Professional yet friendly
-- Enthusiastic about job opportunities
-- Match user's language preference (English/Hindi/Hinglish)
-- Use conversation context to provide better recommendations
+        PERSONALITY TRAITS:
+        - Professional yet friendly
+        - Enthusiastic about job opportunities
+        - Match user's language preference (English/Hindi/Hinglish)
+        - Use conversation context to provide better recommendations
 
-LANGUAGE HANDLING:
-- If user speaks Hinglish, respond in Hinglish
-- If user speaks Hindi, respond in Hindi  
-- If user speaks English, respond in English
-- Use natural code-switching for Hinglish users
+        LANGUAGE HANDLING:
+        - If user speaks Hinglish, respond in Hinglish
+        - If user speaks Hindi, respond in Hindi  
+        - If user speaks English, respond in English
+        - Use natural code-switching for Hinglish users
 
-RESPONSE FORMAT:
-When presenting job results, format them clearly with:
-- Job title and company
-- Location and work mode
-- Key requirements
-- Brief description
-- Application link or next steps
+        RESPONSE FORMAT:
+        When presenting job results, format them clearly with:
+        - Job title and company
+        - Location and work mode
+        - Key requirements
+        - Brief description
+        - Application link or next steps
 
-Always consider the conversation history to provide contextual recommendations."""
-    
+        Always consider the conversation history to provide contextual recommendations.
+        """
+            
     async def search_jobs(self, routing_data: Dict[str, Any]) -> Dict[str, Any]:
         """Search for jobs based on the routing data"""
         try:
@@ -89,17 +91,28 @@ Always consider the conversation history to provide contextual recommendations."
             # Store conversation in memory
             if self.memory_manager:
                 await self.memory_manager.store_conversation(session_id, original_query, response_text)
+
+            total_jobs = len(jobs)
             
             return self.create_response(
-                'job_search_results',
+                'job_search',
                 response_text,
                 {
                     'jobs': jobs[:10],  # Limit to top 10 jobs for UI
-                    'total_found': len(jobs),
-                    'search_params': search_params,
+                    'totalJobs': total_jobs,
+                    'currentPage': 1,
+                    'hasMore': len(jobs) > 10,
                     'category': 'JOB_SEARCH',
                     'sessionId': session_id,
-                    'language': extracted_data.get('language', 'english')
+                    'language': extracted_data.get('language', 'english'),
+                    'currentPage': jobs_data.get('page', 1) if isinstance(jobs_data, dict) else 1,
+                    'searchQuery': routing_data.get('searchQuery') or routing_data.get('originalQuery'),
+                    'searchParams': search_params,
+                    'debug': {
+                        'raw_response_keys': list(jobs_data.keys()) if isinstance(jobs_data, dict) else None,
+                        'jobs_count': len(jobs) if isinstance(jobs, list) else 0,
+                        'api_total': jobs_data.get('total') if isinstance(jobs_data, dict) else None
+                    }
                 }
             )
             
