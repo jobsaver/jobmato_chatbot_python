@@ -596,38 +596,7 @@
                 <h2>Sessions</h2>
                 <p>Manage your conversations</p>
             </div>
-            
-            <div class="sessions-list">
-                <div class="session-item active">
-                    <div class="session-title">Session 1</div>
-                    <div class="session-meta">
-                        <span>12 messages</span>
-                        <div class="session-actions">
-                            <button class="session-action-btn">Delete</button>
-                        </div>
-                    </div>
-                </div>
-                <div class="session-item">
-                    <div class="session-title">Session 2</div>
-                    <div class="session-meta">
-                        <span>5 messages</span>
-                        <div class="session-actions">
-                            <button class="session-action-btn">Delete</button>
-                        </div>
-                    </div>
-                </div>
-                <div class="session-item">
-                    <div class="session-title">Session 3</div>
-                    <div class="session-meta">
-                        <span>3 messages</span>
-                        <div class="session-actions">
-                            <button class="session-action-btn">Delete</button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            
-            <button class="new-chat-btn">New Chat</button>
+            <div class="sessions-list"></div>
         </div>
         
         <div class="chat-main">
@@ -700,18 +669,90 @@
                 this.socket = null;
                 this.connected = false;
                 this.authenticated = false;
-                
-                // Job search state tracking
-                this.currentSearchQuery = '';
-                this.currentPage = 1;
-                this.hasMoreJobs = false;
-                
-                // JWT Token for authentication (in production, this should come from your auth system)
                 this.jwtToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjY4NDcxMDBlYTQxN2IwMGEyMGYzZjA1MSIsImVtYWlsIjoiaGFja3lhYmhheUBnbWFpbC5jb20iLCJpYXQiOjE3NTA1Nzk4MDYsImV4cCI6MTc1MTE4NDYwNn0.5cMF3TDItaJt7JPONtHEF3lAe-qgL8Q8ujwMagC1fVo';
-                
                 this.initializeWebSocket();
                 this.initializeEventListeners();
                 this.autoResizeTextarea();
+                this.fetchSessions(); // Load sessions on startup
+            }
+
+            async fetchSessions() {
+                try {
+                    console.log('🔍 Fetching sessions...');
+                    const res = await fetch('/api/sessions', {
+                        headers: { 'Authorization': 'Bearer ' + this.jwtToken }
+                    });
+                    console.log('📡 API Response status:', res.status);
+                    const data = await res.json();
+                    console.log('📋 Sessions data:', data);
+                    if (data.success) {
+                        console.log('✅ Rendering sessions list with', data.sessions.length, 'sessions');
+                        this.renderSessionsList(data.sessions);
+                    } else {
+                        console.error('❌ Failed to fetch sessions:', data.message);
+                    }
+                } catch (e) {
+                    console.error('❌ Failed to fetch sessions:', e);
+                }
+            }
+
+            async fetchChatHistory(sessionId) {
+                try {
+                    const res = await fetch(`/api/history/${sessionId}`, {
+                        headers: { 'Authorization': 'Bearer ' + this.jwtToken }
+                    });
+                    const data = await res.json();
+                    if (data.success) {
+                        this.loadChatHistory(data.data);
+                    }
+                } catch (e) {
+                    console.error('Failed to fetch chat history:', e);
+                }
+            }
+
+            renderSessionsList(sessions) {
+                console.log('🎨 Rendering sessions list:', sessions);
+                const sessionsList = document.querySelector('.sessions-list');
+                console.log('📋 Sessions list element:', sessionsList);
+                sessionsList.innerHTML = '';
+                // New Chat button
+                const newChatBtn = document.createElement('button');
+                newChatBtn.className = 'new-chat-btn';
+                newChatBtn.textContent = 'New Chat';
+                newChatBtn.onclick = () => this.createNewSession();
+                sessionsList.appendChild(newChatBtn);
+                console.log('➕ Added New Chat button');
+                // Session items
+                sessions.forEach(session => {
+                    console.log('📝 Creating session item for:', session);
+                    const sessionItem = document.createElement('div');
+                    sessionItem.className = 'session-item' + (session.sessionId === this.sessionId ? ' active' : '');
+                    sessionItem.onclick = () => {
+                        this.sessionId = session.sessionId;
+                        this.fetchChatHistory(session.sessionId);
+                        this.updateActiveSession(session.sessionId);
+                    };
+                    sessionItem.innerHTML = `
+                        <div class="session-title">${session.title || 'Untitled Chat'}</div>
+                        <div class="session-meta">
+                            <span>${session.messageCount || 0} messages</span>
+                            <div class="session-actions">
+                                <button class="session-action-btn" onclick="event.stopPropagation(); chatbot.deleteSession('${session.sessionId}')">Delete</button>
+                            </div>
+                        </div>
+                    `;
+                    sessionsList.appendChild(sessionItem);
+                    console.log('✅ Added session item:', session.sessionId);
+                });
+                console.log('🎯 Finished rendering sessions list');
+            }
+
+            createNewSession() {
+                // Use WebSocket to create a new session, then refresh sessions list
+                if (this.socket) {
+                    this.socket.emit('init_chat', {});
+                    setTimeout(() => this.fetchSessions(), 1000); // Give backend time to create
+                }
             }
 
             initializeWebSocket() {
@@ -863,7 +904,7 @@
                     console.log('🗑️ Session deleted:', data);
                     if (data.success) {
                         // Reload sessions list
-                        this.loadUserSessions();
+                        this.fetchSessions();
                         // If the deleted session was active, create a new one
                         if (data.sessionId === this.sessionId) {
                             this.createNewSession();
@@ -876,7 +917,7 @@
                     console.log('✏️ Session title updated:', data);
                     if (data.success) {
                         // Reload sessions list to show updated title
-                        this.loadUserSessions();
+                        this.fetchSessions();
                     }
                 });
             }
@@ -889,7 +930,7 @@
                 
                 // Load user sessions after initialization
                 setTimeout(() => {
-                    this.loadUserSessions();
+                    this.fetchSessions();
                 }, 1000);
             }
             

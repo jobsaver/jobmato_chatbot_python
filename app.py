@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, render_template
+from flask import Flask, request, jsonify, render_template, send_file
 from flask_socketio import SocketIO, emit, join_room, leave_room, disconnect
 from datetime import datetime
 import json
@@ -1014,6 +1014,16 @@ def handle_clear_session(data):
 def index():
     """Serve the chat interface"""
     return render_template('chat.html')
+
+@app.route('/test')
+def test_frontend():
+    """Serve the test frontend for debugging"""
+    import os
+    test_file_path = os.path.join(os.path.dirname(__file__), 'test_frontend.html')
+    if os.path.exists(test_file_path):
+        return app.send_file(test_file_path)
+    else:
+        return "Test file not found", 404
 
 @app.route('/jobmato-assistant-test', methods=['POST'])
 def main_webhook():
