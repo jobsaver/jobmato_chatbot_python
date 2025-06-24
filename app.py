@@ -1,5 +1,6 @@
 from flask import Flask, request, jsonify, render_template, send_file
 from flask_socketio import SocketIO, emit, join_room, leave_room, disconnect
+from flask_cors import CORS
 from datetime import datetime
 import json
 import re
@@ -27,6 +28,9 @@ logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 app.config.from_object(config[os.environ.get('FLASK_ENV', 'development')])
+
+# Enable CORS for cross-origin requests
+CORS(app, origins=["http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:3000", "http://127.0.0.1:3000"], supports_credentials=True)
 
 # Get configuration
 current_config = config[os.environ.get('FLASK_ENV', 'development')]
@@ -1015,13 +1019,23 @@ def index():
     """Serve the chat interface"""
     return render_template('chat.html')
 
+@app.route('/health')
+def health_check():
+    """Health check endpoint for debugging"""
+    return jsonify({
+        'status': 'healthy',
+        'timestamp': datetime.now().isoformat(),
+        'mongodb_connected': chatbot.memory_manager.mongodb_manager.connected if hasattr(chatbot, 'memory_manager') and chatbot.memory_manager else False,
+        'redis_connected': redis_client is not None
+    })
+
 @app.route('/test')
 def test_frontend():
     """Serve the test frontend for debugging"""
     import os
     test_file_path = os.path.join(os.path.dirname(__file__), 'test_frontend.html')
     if os.path.exists(test_file_path):
-        return app.send_file(test_file_path)
+        return send_file(test_file_path)
     else:
         return "Test file not found", 404
 
