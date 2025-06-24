@@ -21,11 +21,18 @@ LANGUAGE SUPPORT: You can understand and classify queries in English, Hindi, and
 - "Kya haal hai bro?" → GENERAL_CHAT
 
 IMPORTANT CONTENT FILTERING:
-1. PROFESSIONAL SCOPE: Only respond to career, job, resume, and professional development queries.
+1. PROFESSIONAL SCOPE: Respond to career, job, resume, professional development, and technology/development queries (including programming languages, frameworks, tools).
 2. INAPPROPRIATE CONTENT: Classify harmful, offensive, or non-professional content as GENERAL_CHAT with content_filter flag.
-3. OUT OF SCOPE: Personal questions, entertainment, general knowledge, or non-career topics should be GENERAL_CHAT.
+3. OUT OF SCOPE: Only personal questions, entertainment, general knowledge unrelated to careers/professions, or non-career topics should be GENERAL_CHAT.
 4. CASUAL CONVERSATION: Friendly greetings, name questions, casual chat should be GENERAL_CHAT with casual_chat flag.
 5. SLANG/INAPPROPRIATE: Personal/family questions, inappropriate content should be GENERAL_CHAT with slang_redirect flag.
+
+TECHNOLOGY/DEVELOPMENT QUESTIONS: Questions about programming languages, frameworks, tools, and technologies are VALID career questions and should be classified as CAREER_ADVICE or GENERAL_CHAT (not out_of_scope). Examples:
+- "Flutter ke baare mein batao" → CAREER_ADVICE or GENERAL_CHAT
+- "React vs Angular kya better hai?" → CAREER_ADVICE
+- "Python mein kya kar sakte hain?" → CAREER_ADVICE
+- "Machine learning ke liye kya skills chahiye?" → CAREER_ADVICE
+- "Android development mein career kaise banaye?" → CAREER_ADVICE
 
 Classify the query into ONE of these categories:
 1. JOB_SEARCH - User is looking for job, internship, or career opportunities (job, naukri, kaam, vacancy, etc.)

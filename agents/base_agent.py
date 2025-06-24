@@ -21,25 +21,12 @@ class BaseAgent(ABC, JobMatoToolsMixin):
             return ""
         
         try:
-            # Get last 5 messages for context
+            # Get last 5 messages for context using the memory manager
             history = await self.memory_manager.get_conversation_history(session_id, limit=limit)
             if not history:
                 return ""
             
-            # Format context nicely
-            context_lines = []
-            for msg in history[-limit:]:  # Get last N messages
-                if isinstance(msg, dict):
-                    user_msg = msg.get('user_message', '')
-                    bot_msg = msg.get('bot_response', '')
-                    if user_msg:
-                        context_lines.append(f"User: {user_msg}")
-                    if bot_msg:
-                        context_lines.append(f"Assistant: {bot_msg}")
-                elif isinstance(msg, str):
-                    context_lines.append(msg)
-            
-            return "\n".join(context_lines) if context_lines else ""
+            return history
             
         except Exception as e:
             logger.error(f"Error getting conversation context: {str(e)}")

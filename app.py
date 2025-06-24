@@ -277,6 +277,12 @@ class JobMatoChatBot:
     async def process_message(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """Process incoming message through the workflow"""
         try:
+            # Get conversation context first (last 5 messages)
+            session_id = data.get('sessionId', '')
+            conversation_context = ""
+            if session_id and self.memory_manager:
+                conversation_context = await self.memory_manager.get_conversation_history(session_id, limit=5)
+            
             # Step 1: Classify the query
             classification_response = await self.query_classifier.classify_query(
                 data.get('chatInput', ''), 
@@ -286,6 +292,9 @@ class JobMatoChatBot:
             
             # Step 2: Parse classification
             routing_data = self.parse_classification(classification_response, data)
+            
+            # Add conversation context to routing data
+            routing_data['conversation_context'] = conversation_context
             
             # Step 3: Route to appropriate agent
             category = routing_data['category']
@@ -364,10 +373,7 @@ def disconnect_unauthorized():
 def handle_disconnect():
     user_id = get_user_id()
     session_id = active_sessions.get(request.sid)
-    logger.info(f"👋 Client disconnected: {request.sid}", {
-        'userId': user_id,
-        'sessionId': session_id
-    })
+    logger.info(f"👋 Client disconnected: {request.sid}")
     if user_id and redis_client:
         try:
             redis_client.hdel(f"user_sessions:{user_id}", "socketId")
@@ -387,7 +393,7 @@ def handle_init_chat(data=None):
         if not user_id:
             raise Exception("User not authenticated")
         
-        logger.info(f"🔄 Initializing chat for user {user_id}", data)
+        logger.info(f"🔄 Initializing chat for user {user_id}")
         
         session_id = data.get('sessionId') if data else None
         

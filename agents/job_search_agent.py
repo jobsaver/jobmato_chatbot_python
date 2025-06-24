@@ -49,6 +49,11 @@ class JobSearchAgent(BaseAgent):
             session_id = routing_data.get('sessionId', 'default')
             original_query = routing_data.get('originalQuery', '')
             extracted_data = routing_data.get('extractedData', {})
+            conversation_context = routing_data.get('conversation_context', '')
+            
+            # Log conversation context for debugging
+            if conversation_context:
+                logger.info(f"📝 Using conversation context: {conversation_context[:200]}...")
             
             # Build comprehensive search parameters
             search_params = self._build_search_params(extracted_data, {}, {})
