@@ -1,6 +1,6 @@
 import logging
 import random
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from .base_agent import BaseAgent
 from utils.llm_client import LLMClient
 from utils.memory_manager import MemoryManager
@@ -148,6 +148,8 @@ Handle conversations naturally while steering toward professional development. I
             original_query = routing_data.get('originalQuery', '')
             session_id = routing_data.get('sessionId', 'default')
             extracted_data = routing_data.get('extractedData', {})
+
+            profile_data = await self.get_profile_data(token, base_url)
             
             # Check for content filtering flags
             if extracted_data.get('content_filtered'):
@@ -155,7 +157,7 @@ Handle conversations naturally while steering toward professional development. I
             
             # Handle casual chat (name questions, greetings, etc.)
             if extracted_data.get('casual_chat'):
-                return self._handle_casual_chat(original_query, extracted_data.get('language', 'english'))
+                return self._handle_casual_chat(original_query, extracted_data.get('language', 'english'), profile_data)
             
             # Handle slang/inappropriate questions
             if extracted_data.get('slang_redirect'):
@@ -244,9 +246,10 @@ Handle conversations naturally while steering toward professional development. I
                 {'error': str(e)}
             )
     
-    def _handle_casual_chat(self, query: str, language: str) -> Dict[str, Any]:
+    def _handle_casual_chat(self, query: str, language: str, profile_data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Handle casual chat like name questions, greetings"""
         query_lower = query.lower()
+        user_name = profile_data.get("personalInfo", {}).get("fullName") if profile_data else "yaar"
         
         # Handle slang/inappropriate questions with humor
         if any(word in query_lower for word in [
@@ -273,19 +276,24 @@ Handle conversations naturally while steering toward professional development. I
                 {'chat_type': 'hobby_redirect', 'language': language}
             )
         
-        # Handle name questions
-        elif any(word in query_lower for word in ['name', 'naam', 'tumhara naam', 'your name', 'who are you', 'kaun ho', 'tera naam', 'mera naam']):
-            # Check if user is asking about their own name or the assistant's name
-            if any(word in query_lower for word in ['mera naam', 'my name', 'tumko pata hai', 'you know']):
-                if language == 'hindi':
-                    response = "Haan, aapka naam Abhay hai! 😊 Main aapko yaad rakhta hoon. Ab batao, kya career help chahiye?"
-                elif language == 'hinglish':
-                    response = "Haan yaar, tumhara naam Abhay hai! 😊 Main remember karta hoon. Ab batao, kya career goals hain?"
-                else:
-                    response = "Yes, your name is Abhay! 😊 I remember you. Now, what career goals can I help you with?"
+        elif query_lower in ['hi', 'hello', 'hey', 'how are you', 'hi how are you']:
+            if language == 'hindi':
+                response = "Namaste! Main theek hoon. Aap kaise ho? 😊 Career ke baare mein kuch poochhna hai?"
+            elif language == 'hinglish':
+                response = "Heyy! Main mast hoon yaar 😄 Tum sunao, kya chal raha hai? Kya career advice chahiye?"
             else:
-                response = self._get_varied_response(self.name_responses)
-        # Handle when user provides their name
+                response = "Hey! I'm doing great 😊 How about you? Ready to talk career stuff?"
+            return self.create_response('plain_text', response, {'chat_type': 'greeting', 'language': language})
+        
+
+        elif any(word in query_lower for word in ['mera naam', 'my name', 'tumko pata hai', 'you know']):
+            if language == 'hindi':
+                response = f"Haan, aapka naam {user_name} hai! 😊 Main aapko yaad rakhta hoon. Ab batao, kya career help chahiye?"
+            elif language == 'hinglish':
+                response = f"Haan yaar, tumhara naam {user_name} hai! 😊 Main remember karta hoon. Ab batao, kya career goals hain?"
+            else:
+                response = f"Yes, your name is {user_name}! 😊 I remember you. Now, what career goals can I help you with?"
+        
         elif any(name in query_lower for name in ['abhay', 'my name is', 'mera naam']):
             if language == 'hindi':
                 response = "Nice to meet you, Abhay! 🙏 Main aapka career companion hoon. Kya career goals hain aapke?"
@@ -317,7 +325,6 @@ Handle conversations naturally while steering toward professional development. I
         else:
             # Handle other casual chat
             response = self._get_varied_response(self.casual_responses)
-        
         return self.create_response(
             'plain_text',
             response,
