@@ -12,6 +12,8 @@ logger = logging.getLogger(__name__)
 class JobSearchAgent(BaseAgent):
     """Agent responsible for handling job search requests"""
     
+    UNREALISTIC_LOCATIONS = {"mars", "moon", "jupiter", "saturn", "venus", "pluto", "mercury", "neptune", "uranus", "andromeda", "milky way", "galaxy", "space", "sun"}
+    
     def __init__(self, memory_manager=None):
         super().__init__(memory_manager)
         self.llm_client = LLMClient()
@@ -54,6 +56,18 @@ class JobSearchAgent(BaseAgent):
             # Log conversation context for debugging
             if conversation_context:
                 logger.info(f"📝 Using conversation context: {conversation_context[:200]}...")
+            
+            # Add this helper at the top of the class
+            extracted_location = extracted_data.get('location', '')
+            if self._is_unrealistic_location(extracted_location):
+                return self.response_formatter.format_plain_text_response(
+                    content="Sorry, I can't find jobs on Mars yet! 🚀 But I can help you find great opportunities here on Earth. Where would you like to work?",
+                    metadata={
+                        'error': 'unrealistic_location',
+                        'category': 'JOB_SEARCH',
+                        'location': extracted_location
+                    }
+                )
             
             # Build comprehensive search parameters
             search_params = self._build_search_params(extracted_data, {}, {})
@@ -1075,3 +1089,9 @@ class JobSearchAgent(BaseAgent):
         
         logger.info(f"🔄 Built broader search params: {essential_params}")
         return essential_params 
+
+    def _is_unrealistic_location(self, location: str) -> bool:
+        if not location:
+            return False
+        location_lower = location.strip().lower()
+        return any(loc in location_lower for loc in self.UNREALISTIC_LOCATIONS) 
