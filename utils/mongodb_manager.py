@@ -86,6 +86,49 @@ class MongoDBManager:
         except Exception as e:
             logger.warning(f"⚠️ Could not create indexes: {str(e)}")
     
+    async def batch_upsert_messages(self, session_id: str, user_id: str, messages: List[Dict[str, Any]], user_profile: Optional[Dict[str, Any]] = None, metadata: Optional[Dict[str, Any]] = None):
+        """Batch upsert multiple messages into the chat session's messages array for better performance"""
+        if not self.connected:
+            logger.warning("MongoDB not connected, attempting to reconnect...")
+            self._connect()
+            if not self.connected:
+                return False
+        try:
+            now = datetime.utcnow()
+            # Validate/format userProfile and messages
+            formatted_user_profile = validate_user_profile(user_profile) if user_profile else None
+            formatted_messages = [validate_message(msg) for msg in messages]
+            
+            update_doc = {
+                '$setOnInsert': {
+                    'sessionId': session_id,
+                    'userId': user_id,
+                    'title': 'New Chat',
+                    'createdAt': now,
+                },
+                '$set': {
+                    'updatedAt': now,
+                },
+                '$push': {
+                    'messages': {'$each': formatted_messages}
+                }
+            }
+            if formatted_user_profile:
+                update_doc['$set']['userProfile'] = formatted_user_profile
+            if metadata:
+                update_doc['$set']['metadata'] = metadata
+                
+            self.collection.update_one(
+                {'sessionId': session_id},
+                update_doc,
+                upsert=True
+            )
+            logger.info(f"💾 Batch upserted {len(formatted_messages)} messages for session {session_id}")
+            return True
+        except Exception as e:
+            logger.error(f"❌ Error batch upserting messages: {str(e)}")
+            return False
+    
     async def upsert_message(self, session_id: str, user_id: str, message: Dict[str, Any], user_profile: Optional[Dict[str, Any]] = None, metadata: Optional[Dict[str, Any]] = None):
         """Upsert a message into the chat session's messages array, enforcing schema"""
         if not self.connected:
