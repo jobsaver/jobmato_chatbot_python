@@ -471,8 +471,12 @@ def handle_init_chat(data=None):
             'timestamp': datetime.now().isoformat()
         }
         
-        emit(current_config.SOCKET_EVENTS['session_status'], response, room=request.sid)
+        # Support both callback and event-based responses
+        emit('session_initialized', response, room=request.sid)
         emit('init_response', response, room=request.sid)
+        
+        # Return response for acknowledgment callback
+        return response
         
     except Exception as e:
         logger.error(f"❌ Init chat error: {str(e)}")
@@ -482,8 +486,11 @@ def handle_init_chat(data=None):
             'timestamp': datetime.now().isoformat()
         }
         
-        emit(current_config.SOCKET_EVENTS['session_status'], error_response, room=request.sid)
+        emit('session_initialized', error_response, room=request.sid)
         handle_error('init_error', e)
+        
+        # Return error for acknowledgment callback
+        return error_response
 
 @socketio.on(current_config.SOCKET_EVENTS['send_message'])
 def handle_send_message(data):
@@ -494,19 +501,49 @@ def handle_send_message(data):
         
         logger.info(f"💬 Processing message: '{data.get('message', '')}' for session {session_id}, user {user_id}")
         
-        if not user_id or not session_id:
-            # Try to recover the session
-            if user_id:
-                # Try Redis recovery
-                if redis_client:
-                    redis_session_id = redis_client.get(f"last_session:{user_id}")
-                    if redis_session_id:
-                        logger.info(f"🔄 Attempting session recovery from Redis: {redis_session_id}")
-                        handle_init_chat({'sessionId': redis_session_id})
-                        # Retry sending message after session recovery
-                        if data.get('message'):
-                            socketio.start_background_task(lambda: retry_send_message(request, data))
+        if not user_id:
+            emit(current_config.SOCKET_EVENTS['error'], {
+                'message': 'User not authenticated. Please reconnect.',
+                'code': 'AUTH_REQUIRED'
+            }, room=request.sid)
             return
+        
+        if not session_id:
+            # Create a new session automatically
+            logger.info(f"🔄 No active session found, creating new session for user {user_id}")
+            session_id = f"session_{user_id}_{int(datetime.now().timestamp())}"
+            
+            # Cache session in Redis
+            if redis_client:
+                try:
+                    session_data = {
+                        'userId': user_id,
+                        'sessionId': session_id,
+                        'createdAt': datetime.now().isoformat()
+                    }
+                    redis_client.setex(f"chat_session:{session_id}", current_config.SESSION_TIMEOUT_HOURS * 3600, json.dumps(session_data))
+                    redis_client.setex(f"last_session:{user_id}", current_config.SESSION_TIMEOUT_HOURS * 3600, session_id)
+                except Exception as redis_error:
+                    logger.warn(f"⚠️ Failed to cache session in Redis: {str(redis_error)}")
+            
+            # Add to user sessions
+            if user_id not in user_sessions:
+                user_sessions[user_id] = set()
+            user_sessions[user_id].add(session_id)
+            
+            # Update socket mappings
+            active_sessions[request.sid] = session_id
+            join_room(user_id)
+            
+            logger.info(f"✅ Created new session {session_id} for user {user_id}")
+            
+            # Send session status update
+            emit('session_initialized', {
+                'connected': True,
+                'sessionId': session_id,
+                'userId': user_id,
+                'timestamp': datetime.now().isoformat()
+            }, room=request.sid)
         
         message = data.get('message', '')
         if not message or not isinstance(message, str):
@@ -1349,6 +1386,95 @@ def get_chat_history_api(session_id):
         return jsonify({'success': True, 'data': history})
     except Exception as error:
         return jsonify({'success': False, 'message': str(error)}), 500
+
+@socketio.on('create_new_chat')
+def handle_create_new_chat(data=None):
+    """Handle explicit request to create a new chat session"""
+    try:
+        user_id = get_user_id()
+        if not user_id:
+            raise Exception("User not authenticated")
+        
+        logger.info(f"🆕 Creating new chat session for user {user_id}")
+        
+        # Create new session
+        session_id = f"session_{user_id}_{int(datetime.now().timestamp())}"
+        
+        # Cache session in Redis
+        if redis_client:
+            try:
+                session_data = {
+                    'userId': user_id,
+                    'sessionId': session_id,
+                    'createdAt': datetime.now().isoformat()
+                }
+                redis_client.setex(f"chat_session:{session_id}", current_config.SESSION_TIMEOUT_HOURS * 3600, json.dumps(session_data))
+                redis_client.setex(f"last_session:{user_id}", current_config.SESSION_TIMEOUT_HOURS * 3600, session_id)
+            except Exception as redis_error:
+                logger.warn(f"⚠️ Failed to cache session in Redis: {str(redis_error)}")
+        
+        # Add to user sessions
+        if user_id not in user_sessions:
+            user_sessions[user_id] = set()
+        user_sessions[user_id].add(session_id)
+        
+        # Update socket mappings
+        active_sessions[request.sid] = session_id
+        join_room(user_id)
+        
+        logger.info(f"✅ New session {session_id} created for user {user_id}")
+        
+        # Send success response
+        response = {
+            'connected': True,
+            'sessionId': session_id,
+            'userId': user_id,
+            'timestamp': datetime.now().isoformat(),
+            'isNewSession': True
+        }
+        
+        emit(current_config.SOCKET_EVENTS['session_status'], response, room=request.sid)
+        emit('new_chat_created', response, room=request.sid)
+        
+    except Exception as e:
+        logger.error(f"❌ Create new chat error: {str(e)}")
+        error_response = {
+            'connected': False,
+            'error': str(e) if isinstance(e, Exception) else "Failed to create new chat",
+            'timestamp': datetime.now().isoformat()
+        }
+        
+        emit(current_config.SOCKET_EVENTS['session_status'], error_response, room=request.sid)
+        handle_error('new_chat_error', e)
+
+@app.route('/api/auth/me', methods=['GET'])
+def auth_me():
+    """Get current user info from JWT token"""
+    try:
+        auth_header = request.headers.get('Authorization', '')
+        if not auth_header.startswith('Bearer '):
+            return jsonify({'success': False, 'message': 'Authorization header required'}), 401
+        token = auth_header.replace('Bearer ', '')
+        payload = jwt.decode(token, options={"verify_signature": False})
+        user_id = payload.get('id')
+        email = payload.get('email')
+        if not user_id:
+            return jsonify({'success': False, 'message': 'Invalid token'}), 401
+        return jsonify({
+            'success': True, 
+            'user': {
+                'id': user_id, 
+                'email': email,
+                'authenticated': True
+            }
+        })
+    except Exception as error:
+        return jsonify({'success': False, 'message': str(error)}), 401
+
+@app.route('/api/chatbot/sessions', methods=['GET'])
+def chatbot_sessions():
+    """Get chat sessions for the authenticated user (alias for /api/sessions)"""
+    return get_user_sessions_api()
 
 if __name__ == '__main__':
     # Use SocketIO's run method instead of Flask's run method
