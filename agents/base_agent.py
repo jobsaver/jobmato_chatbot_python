@@ -4,6 +4,7 @@ from typing import Dict, Any, Optional
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
 from utils.jobmato_tools import JobMatoToolsMixin
+from utils.response_formatter import ResponseFormatter
 
 logger = logging.getLogger(__name__)
 
@@ -14,6 +15,7 @@ class BaseAgent(ABC, JobMatoToolsMixin):
         super().__init__()
         self.base_url = "https://backend-v1.jobmato.com"
         self.memory_manager = memory_manager
+        self.response_formatter = ResponseFormatter()
     
     async def get_conversation_context(self, session_id: str, limit: int = 3) -> str:
         """Get recent conversation history for context (last 3 messages for agents)"""
@@ -130,22 +132,9 @@ class BaseAgent(ABC, JobMatoToolsMixin):
         content: str, 
         metadata: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
-        """Create a standardized response format with enforced allowed types (except job agent)"""
-        allowed_types = {
-            "plain_text",
-            "markdown",
-            "resume_analysis",
-            "career_advice",
-            "project_suggestion",
-            "resume_upload_required"
-        }
-        if response_type not in allowed_types:
-            raise ValueError(f"Response type '{response_type}' is not allowed. Allowed types: {allowed_types}")
-        return {
-            "content": content.strip(),
-            "type": response_type,
-            "metadata": {
-                "timestamp": datetime.now(timezone.utc).isoformat() + "Z",
-                **(metadata or {})
-            }
-        }
+        """Create a standardized response format matching Dart ChatBoatHistoryModel"""
+        return self.response_formatter.format_chat_response(
+            content=content,
+            response_type=response_type,
+            metadata=metadata
+        )

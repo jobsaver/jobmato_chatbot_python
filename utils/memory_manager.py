@@ -129,6 +129,7 @@ class MemoryManager:
                     'content': user_message,
                     'timestamp': now,
                     'type': 'plain_text',
+                    'id': f"user_{now.timestamp()}",
                     'metadata': metadata or {}
                 }
                 await self.mongodb_manager.upsert_message(
@@ -144,6 +145,7 @@ class MemoryManager:
                     'content': assistant_message,
                     'timestamp': now,
                     'type': 'plain_text',
+                    'id': f"assistant_{now.timestamp()}",
                     'metadata': metadata or {}
                 }
                 await self.mongodb_manager.upsert_message(
@@ -168,6 +170,7 @@ class MemoryManager:
                     'content': user_message,
                     'timestamp': now.isoformat(),
                     'type': 'plain_text',
+                    'id': f"user_{now.timestamp()}",
                     'metadata': metadata or {}
                 })
                 self.conversations[session_id]['history'].append({
@@ -175,6 +178,7 @@ class MemoryManager:
                     'content': assistant_message,
                     'timestamp': now.isoformat(),
                     'type': 'plain_text',
+                    'id': f"assistant_{now.timestamp()}",
                     'metadata': metadata or {}
                 })
                 self.conversations[session_id]['last_activity'] = datetime.now().isoformat()

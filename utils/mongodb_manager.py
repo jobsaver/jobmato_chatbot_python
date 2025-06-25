@@ -27,11 +27,13 @@ def validate_user_profile(user_profile):
     }
 
 def validate_message(message):
+    """Validate and format message to match Dart ChatBoatHistoryModel structure"""
     return {
         "role": message.get("role", "user"),
         "content": message.get("content", ""),
         "timestamp": message.get("timestamp"),
         "type": message.get("type", "plain_text"),
+        "id": message.get("id", ""),
         "metadata": message.get("metadata", {}),
     }
 

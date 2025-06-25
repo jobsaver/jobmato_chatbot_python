@@ -343,14 +343,12 @@ class JobMatoChatBot:
             
         except Exception as e:
             logger.error(f"Error processing message: {str(e)}")
-            return {
-                'type': current_config.RESPONSE_TYPES['plain_text'],
-                'content': 'I apologize, but I encountered an error processing your request. Please try again.',
-                'metadata': {
-                    'error': str(e),
-                    'timestamp': datetime.now().isoformat()
-                }
-            }
+            from utils.response_formatter import ResponseFormatter
+            formatter = ResponseFormatter()
+            return formatter.format_error_response(
+                error_message='I apologize, but I encountered an error processing your request. Please try again.',
+                error_details=str(e)
+            )
 
 # Initialize the chatbot
 chatbot = JobMatoChatBot()
@@ -1130,14 +1128,12 @@ def main_webhook():
         
     except Exception as e:
         logger.error(f"Error in main webhook: {str(e)}")
-        return jsonify({
-            'type': current_config.RESPONSE_TYPES['plain_text'],
-            'content': 'Sorry, I encountered an error. Please try again.',
-            'metadata': {
-                'error': str(e),
-                'timestamp': datetime.now().isoformat()
-            }
-        }), 500
+        from utils.response_formatter import ResponseFormatter
+        formatter = ResponseFormatter()
+        return jsonify(formatter.format_error_response(
+            error_message='Sorry, I encountered an error. Please try again.',
+            error_details=str(e)
+        )), 500
 
 @app.route('/resume-upload', methods=['POST'])
 def resume_upload_webhook():
@@ -1145,15 +1141,16 @@ def resume_upload_webhook():
     try:
         # Handle file upload
         if 'resume' not in request.files:
-            return jsonify({
-                'type': current_config.RESPONSE_TYPES['plain_text'],
-                'content': 'No resume file provided. Please upload a PDF file.',
-                'metadata': {
+            from utils.response_formatter import ResponseFormatter
+            formatter = ResponseFormatter()
+            return jsonify(formatter.format_resume_upload_required_response(
+                message='No resume file provided. Please upload a PDF file.',
+                metadata={
                     'uploadSuccess': False,
                     'error': 'No file provided',
                     'uploadDate': datetime.now().isoformat()
                 }
-            }), 400
+            )), 400
         
         file = request.files['resume']
         token = request.form.get('token', '')
@@ -1183,11 +1180,9 @@ def resume_upload_webhook():
             except Exception as e:
                 logger.warning(f"⚠️ Could not extract user ID for broadcasting: {str(e)}")
             
-            return jsonify({
-                'type': current_config.RESPONSE_TYPES['plain_text'],
-                'content': 'Resume uploaded successfully! I can now provide detailed analysis and personalized job recommendations based on your resume.',
-                'metadata': {
-                    'uploadSuccess': True,
+            return jsonify(formatter.format_resume_upload_success_response(
+                message='Resume uploaded successfully! I can now provide detailed analysis and personalized job recommendations based on your resume.',
+                metadata={
                     'resumeId': upload_result.get('resumeId') or upload_result.get('id'),
                     'uploadDate': datetime.now().isoformat(),
                     'nextActions': [
@@ -1196,29 +1191,21 @@ def resume_upload_webhook():
                         'Get career advice'
                     ]
                 }
-            })
+            ))
         else:
-            return jsonify({
-                'type': current_config.RESPONSE_TYPES['plain_text'],
-                'content': 'Resume upload failed. Please ensure you\'re uploading a valid PDF file and try again.',
-                'metadata': {
-                    'uploadSuccess': False,
-                    'error': upload_response.text,
-                    'uploadDate': datetime.now().isoformat()
-                }
-            }), 400
+            return jsonify(formatter.format_error_response(
+                error_message='Resume upload failed. Please ensure you\'re uploading a valid PDF file and try again.',
+                error_details=upload_response.text
+            )), 400
             
     except Exception as e:
         logger.error(f"Error in resume upload: {str(e)}")
-        return jsonify({
-            'type': current_config.RESPONSE_TYPES['plain_text'],
-            'content': 'Resume upload failed due to an unexpected error. Please try again.',
-            'metadata': {
-                'uploadSuccess': False,
-                'error': str(e),
-                'uploadDate': datetime.now().isoformat()
-            }
-        }), 500
+        from utils.response_formatter import ResponseFormatter
+        formatter = ResponseFormatter()
+        return jsonify(formatter.format_error_response(
+            error_message='Resume upload failed due to an unexpected error. Please try again.',
+            error_details=str(e)
+        )), 500
 
 @app.route('/upload-resume', methods=['POST'])
 def upload_resume_ui():
