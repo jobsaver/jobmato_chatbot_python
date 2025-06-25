@@ -21,7 +21,7 @@ class LLMClient:
         genai.configure(api_key=api_key)
         
         # Use the fastest model for better performance
-        self.model = genai.GenerativeModel('gemini-2.0-flash-exp')  # Fastest model
+        self.model = genai.GenerativeModel('gemini-2.5-flash') 
         
         # Simple in-memory cache for repeated queries
         self.cache = {}
