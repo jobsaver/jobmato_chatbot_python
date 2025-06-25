@@ -304,19 +304,40 @@ class JobMatoChatBot:
             
             if category == 'JOB_SEARCH':
                 response = await self.job_search_agent.search_jobs(routing_data)
+                # Map to frontend response type
+                if response.get('type') == 'plain_text':
+                    response['type'] = 'job_search'
             elif category == 'CAREER_ADVICE':
                 response = await self.career_advice_agent.provide_advice(routing_data)
+                # Map to frontend response type
+                if response.get('type') == 'plain_text':
+                    response['type'] = 'career_advice'
             elif category == 'RESUME_ANALYSIS':
                 response = await self.resume_analysis_agent.analyze_resume(routing_data)
+                # Map to frontend response type
+                if response.get('type') == 'plain_text':
+                    response['type'] = 'resume_analysis'
             elif category == 'PROJECT_SUGGESTION':
                 response = await self.project_suggestion_agent.suggest_projects(routing_data)
+                # Map to frontend response type
+                if response.get('type') == 'plain_text':
+                    response['type'] = 'project_suggestion'
             elif category == 'PROFILE_INFO':
                 response = await self.profile_info_agent.get_profile_info(routing_data)
+                # Map to frontend response type
+                if response.get('type') == 'plain_text':
+                    response['type'] = 'profile_info'
             elif category == 'GENERAL_CHAT':
                 response = await self.general_chat_agent.handle_chat(routing_data)
+                # Map to frontend response type
+                if response.get('type') == 'plain_text':
+                    response['type'] = 'general_chat'
             else:
                 # Default to general chat
                 response = await self.general_chat_agent.handle_chat(routing_data)
+                # Map to frontend response type
+                if response.get('type') == 'plain_text':
+                    response['type'] = 'general_chat'
             
             return response
             
@@ -839,7 +860,7 @@ def handle_career_response(socket, response):
     
     emit(current_config.SOCKET_EVENTS['receive_message'], {
         'content': formatted_response,
-        'type': 'career_advice',
+        'type': response.get('type', 'career_advice'),
         'metadata': response.get('metadata', {})
     }, room=request.sid)
 
@@ -869,10 +890,28 @@ def handle_agent_response(socket, response):
             except Exception as e:
                 logger.warn(f"⚠️ Failed to cache job data: {str(e)}")
     
+    # Map response types to frontend CSS classes
+    frontend_response_type = response_type
+    if response_type == 'plain_text':
+        # Determine the appropriate response type based on metadata or category
+        category = metadata.get('category', 'GENERAL_CHAT')
+        if category == 'JOB_SEARCH':
+            frontend_response_type = 'job_search'
+        elif category == 'CAREER_ADVICE':
+            frontend_response_type = 'career_advice'
+        elif category == 'RESUME_ANALYSIS':
+            frontend_response_type = 'resume_analysis'
+        elif category == 'PROJECT_SUGGESTION':
+            frontend_response_type = 'project_suggestion'
+        elif category == 'PROFILE_INFO':
+            frontend_response_type = 'profile_info'
+        else:
+            frontend_response_type = 'general_chat'
+    
     # Always emit through receive_message with consistent format
     emit(current_config.SOCKET_EVENTS['receive_message'], {
         'content': content,
-        'type': response_type,
+        'type': frontend_response_type,
         'metadata': {
             **metadata,
             # For job cards, ensure jobs array is always present

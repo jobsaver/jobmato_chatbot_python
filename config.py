@@ -98,8 +98,14 @@ class Config:
     RESPONSE_TYPES = {
         'plain_text': 'Plain Text Response',
         'job_card': 'Job Card Response',
+        'job_search': 'Job Search Response',
         'career_advice': 'Career Advice Response',
+        'resume_analysis': 'Resume Analysis Response',
+        'project_suggestion': 'Project Suggestion Response',
+        'profile_info': 'Profile Info Response',
+        'general_chat': 'General Chat Response',
         'resume_upload_success': 'Resume Upload Success',
+        'resume_upload_required': 'Resume Upload Required',
         'error': 'Error Response'
     }
     

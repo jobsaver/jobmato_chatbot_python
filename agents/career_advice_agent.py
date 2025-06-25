@@ -147,7 +147,16 @@ class CareerAdviceAgent(BaseAgent):
                 'career_advice',
                 advice_response,
                 {
-                    'trends': self.industry_trends,
+                    'trends': [
+                        {
+                            'trend': trend_name,
+                            'impact': trend_data['impact'],
+                            'skills': trend_data['skills'],
+                            'roles': trend_data['roles'],
+                            'description': trend_data['description']
+                        }
+                        for trend_name, trend_data in self.industry_trends.items()
+                    ],
                     'category': 'CAREER_ADVICE',
                     'user_profile': user_profile,
                     'sessionId': session_id,
