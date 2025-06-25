@@ -166,27 +166,24 @@ class JobSearchAgent(BaseAgent):
             except Exception as e:
                 logger.warning(f"⚠️ Could not store current page: {str(e)}")
 
-            return {
-                'type': 'job_card',
-                'content': content,
-                'metadata': {
-                    'jobs': formatted_jobs,
-                    'totalJobs': total_available,
-                    'isFollowUp': False,
+            return self.response_formatter.format_job_response(
+                jobs=formatted_jobs,
+                metadata={
+                    'total': total_available,
                     'hasMore': has_more,
-                    'currentPage': 1,
+                    'page': 1,
                     'searchQuery': search_query,
-                    'searchContext': search_context  # Include search context in response
+                    'searchParams': search_params,
+                    'searchContext': search_context
                 }
-            }
+            )
             
         except Exception as e:
             logger.error(f"Error in job search: {str(e)}")
-            return {
-                'type': 'plain_text',
-                'content': 'Sorry yaar, job search mein kuch technical issue ho gaya! 😅 Please try again, main help karunga.',
-                'metadata': {'error': str(e), 'category': 'JOB_SEARCH'}
-            }
+            return self.response_formatter.format_error_response(
+                error_message='Sorry yaar, job search mein kuch technical issue ho gaya! 😅 Please try again, main help karunga.',
+                error_details=str(e)
+            )
     
     def _safe_extract(self, obj, key, default=""):
         """Safely extract a value from an object, handling nested structures"""
@@ -272,11 +269,10 @@ class JobSearchAgent(BaseAgent):
         else:
             content = f"Sorry, I encountered a technical issue while searching for '{original_query}'. Please try again with different keywords."
         
-        return {
-            'type': 'plain_text',
-            'content': content,
-            'metadata': {'error': 'search_failed', 'category': 'JOB_SEARCH'}
-        }
+        return self.response_formatter.format_error_response(
+            error_message=content,
+            error_details='search_failed'
+        )
     
     def _handle_no_jobs_found(self, original_query: str, search_params: Dict[str, Any], language: str = 'english') -> Dict[str, Any]:
         """Handle case when no jobs are found even after broader search"""
@@ -305,10 +301,9 @@ class JobSearchAgent(BaseAgent):
             content += "• 'tech jobs'\n"
             content += "• 'remote jobs'"
         
-        return {
-            'type': 'plain_text',
-            'content': content,
-            'metadata': {
+        return self.response_formatter.format_plain_text_response(
+            content=content,
+            metadata={
                 'error': 'no_jobs_found',
                 'category': 'JOB_SEARCH',
                 'searchParams': search_params,
@@ -323,7 +318,7 @@ class JobSearchAgent(BaseAgent):
                 ],
                 'broaderSearchAttempted': True
             }
-        }
+        )
     
     def _build_search_params(self, extracted_data: Dict[str, Any], profile_data: Dict[str, Any], resume_data: Dict[str, Any]) -> Dict[str, Any]:
         """Build comprehensive search parameters from extracted data using JobMato Tools"""
