@@ -12,10 +12,10 @@ class Config:
     DEBUG = os.environ.get('FLASK_DEBUG', 'True').lower() in ['true', '1', 'yes']
     
     # Google Gemini API configuration
-    GOOGLE_API_KEY = os.environ.get('GEMINI_API_KEY') or os.environ.get('GEMINI_API_KEY')
+    GOOGLE_API_KEY = 'AIzaSyCOisI31bZxs1j6WProcu1khBht29tnV4I'
     
     # JobMato API configuration
-    JOBMATO_API_BASE_URL = os.environ.get('JOBMATO_API_BASE_URL', 'https://backend-v1.jobmato.com')
+    JOBMATO_API_BASE_URL = 'https://backend-v1.jobmato.com'
     
     # MongoDB configuration
     MONGODB_URI = os.environ.get('MONGODB_URI', 'mongodb+srv://doadmin:064CU93w5RlQvz18@db-postgresql-blr1--main-db-009faed0.mongo.ondigitalocean.com')
