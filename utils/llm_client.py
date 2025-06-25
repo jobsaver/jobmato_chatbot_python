@@ -17,8 +17,13 @@ class LLMClient:
             raise ValueError("Google API key is required")
         
         genai.configure(api_key=api_key)
-        self.model = genai.GenerativeModel('gemini-1.5-pro')
-    
+        
+        # *** CHANGE THIS LINE FOR FASTER RESPONSES ***
+        # self.model = genai.GenerativeModel('gemini-1.5-flash') 
+        # Or, if available and preferred for even more optimized speed:
+        self.model = genai.GenerativeModel('gemini-2.5-flash') 
+        # self.model = genai.GenerativeModel('gemini-2.5-flash-lite-preview-06-17') # Check for the latest preview models
+
     async def generate_response(self, prompt: str, system_message: str = "", max_tokens:Optional[int] = 1024) -> str:
         """Generate a response using the language model"""
         try:
@@ -66,4 +71,4 @@ class LLMClient:
     
     def _get_fallback_response(self) -> str:
         """Get a fallback response when LLM fails"""
-        return "I apologize, but I'm experiencing technical difficulties. Please try again in a moment, or let me know how I can help with your career! 💼" 
+        return "I apologize, but I'm experiencing technical difficulties. Please try again in a moment, or let me know how I can help with your career! 💼"
