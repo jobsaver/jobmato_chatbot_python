@@ -305,4 +305,415 @@ git pull
 ./deploy_local.sh restart
 # OR
 docker-compose up -d --build
-``` 
+```
+
+# JobMato Chatbot - Enhanced WebSocket Implementation
+
+A Python Flask-based chatbot with enhanced WebSocket functionality, JWT authentication, Redis session management, and real-time communication features.
+
+## 🚀 Features
+
+### Enhanced WebSocket Implementation
+- **JWT Authentication**: Secure WebSocket connections with JWT token validation
+- **Redis Session Management**: Scalable session storage with online Redis support
+- **Real-time Communication**: Typing indicators, connection health monitoring
+- **Resume Upload Integration**: Real-time notifications for resume uploads
+- **Error Handling**: Comprehensive error handling and recovery mechanisms
+- **Connection Health**: Ping/pong monitoring for connection stability
+
+### Chatbot Capabilities
+- **Multi-Agent Architecture**: Specialized agents for different query types
+- **Job Search**: Intelligent job matching and recommendations
+- **Resume Analysis**: ATS optimization and content analysis
+- **Career Advice**: Personalized career guidance
+- **Project Suggestions**: Relevant project recommendations
+- **General Chat**: Conversational AI capabilities
+
+## 📋 Configuration
+
+### Centralized Configuration
+All configuration is centralized in `config.py` with the following structure:
+
+```python
+# Main configuration classes
+- Config: Base configuration with all settings
+- DevelopmentConfig: Development environment settings
+- ProductionConfig: Production environment settings  
+- TestingConfig: Testing environment settings
+```
+
+### Key Configuration Sections
+- **Flask Configuration**: Debug mode, secret keys
+- **API Configuration**: Google Gemini, JobMato API endpoints
+- **Database Configuration**: MongoDB and Redis settings
+- **WebSocket Configuration**: Timeouts, events, connection settings
+- **Security Configuration**: JWT settings, rate limiting
+- **File Upload Configuration**: Size limits, allowed extensions
+- **Agent Configuration**: Timeouts, retry settings
+
+### Environment Variables (Optional Overrides)
+You can override any configuration setting using environment variables:
+
+```bash
+# Copy the example environment file
+cp env.example .env
+
+# Edit .env with your settings
+GEMINI_API_KEY=your_api_key_here
+REDIS_URL=your_redis_url_here
+JWT_SECRET=your_jwt_secret_here
+```
+
+## 🛠️ Setup Instructions
+
+### 1. Install Dependencies
+```bash
+pip install -r requirements.txt
+```
+
+### 2. Configure Redis (Optional but Recommended)
+The application supports both local and online Redis services:
+
+#### Option A: Online Redis (Recommended)
+1. Choose a Redis service:
+   - **Redis Cloud**: https://redis.com/try-free/
+   - **Upstash**: https://upstash.com/
+   - **Railway**: https://railway.app/
+   - **Render**: https://render.com/
+
+2. Get your Redis URL and update configuration:
+```python
+# In config.py or via environment variable
+REDIS_URL = "redis://username:password@host:port"
+REDIS_SSL = True
+```
+
+#### Option B: Local Redis
+```bash
+# Install Redis locally
+brew install redis  # macOS
+sudo apt-get install redis-server  # Ubuntu
+
+# Start Redis
+redis-server
+```
+
+### 3. Configure MongoDB (Optional)
+For chat persistence, set up MongoDB:
+```bash
+# Install MongoDB
+brew install mongodb-community  # macOS
+sudo apt-get install mongodb  # Ubuntu
+
+# Start MongoDB
+mongod
+```
+
+### 4. Set Required API Keys
+```bash
+# Google Gemini API (Required)
+export GEMINI_API_KEY="your_gemini_api_key_here"
+
+# JWT Secret (Optional but recommended)
+export JWT_SECRET="your_jwt_secret_here"
+```
+
+### 5. Run the Application
+```bash
+# Development mode
+python app.py
+
+# Or with specific environment
+FLASK_ENV=production python app.py
+```
+
+## 🔌 WebSocket Usage
+
+### Connection with Authentication
+```javascript
+// Connect with JWT token
+const socket = io('http://localhost:5003', {
+  query: { token: 'your_jwt_token_here' }
+});
+
+// Or with Authorization header
+const socket = io('http://localhost:5003', {
+  extraHeaders: {
+    'Authorization': 'Bearer your_jwt_token_here'
+  }
+});
+```
+
+### Event Handlers
+```javascript
+// Connection events
+socket.on('connect', () => {
+  console.log('Connected to WebSocket');
+});
+
+socket.on('auth_status', (data) => {
+  console.log('Authentication status:', data);
+});
+
+// Chat events
+socket.on('session_status', (data) => {
+  console.log('Session status:', data);
+});
+
+socket.on('receive_message', (data) => {
+  console.log('Received message:', data);
+});
+
+// Typing indicators
+socket.on('typing_status', (data) => {
+  console.log('Typing status:', data);
+});
+
+// Error handling
+socket.on('error', (data) => {
+  console.error('WebSocket error:', data);
+});
+```
+
+### Sending Messages
+```javascript
+// Initialize chat session
+socket.emit('init_chat', { sessionId: 'optional_session_id' });
+
+// Send message
+socket.emit('send_message', { message: 'Hello, how can you help me?' });
+
+// Typing indicator
+socket.emit('typing_status', { isTyping: true });
+
+// Health check
+socket.emit('ping');
+```
+
+## 📡 HTTP Endpoints
+
+### Main Webhook
+```bash
+POST /jobmato-assistant-test
+Content-Type: application/json
+
+{
+  "chatInput": "Hello",
+  "sessionId": "session_123",
+  "token": "jwt_token_here"
+}
+```
+
+### Resume Upload
+```bash
+POST /upload-resume
+Content-Type: multipart/form-data
+
+Form data:
+- resume: file
+- token: jwt_token_here
+- session_id: session_123
+```
+
+## 🔧 Configuration Options
+
+### Redis Configuration
+```python
+# In config.py
+REDIS_URL = "redis://localhost:6379"  # Local Redis
+REDIS_SSL = False
+
+# For online Redis
+REDIS_URL = "redis://username:password@host:port"
+REDIS_SSL = True
+```
+
+### WebSocket Configuration
+```python
+# Connection timeouts
+SOCKETIO_CONNECT_TIMEOUT = 60000  # 60 seconds
+SOCKETIO_PING_TIMEOUT = 60000     # 60 seconds
+SOCKETIO_PING_INTERVAL = 25000    # 25 seconds
+
+# Session management
+SESSION_TIMEOUT_HOURS = 24
+MAX_CONVERSATION_HISTORY = 10
+```
+
+### Security Configuration
+```python
+# JWT settings
+JWT_SECRET = "your_jwt_secret_here"
+JWT_ALGORITHM = "HS256"
+JWT_EXPIRATION_HOURS = 24
+
+# Rate limiting
+RATE_LIMIT_REQUESTS = 100
+RATE_LIMIT_WINDOW = 3600
+```
+
+## 🧪 Testing
+
+### WebSocket Testing
+```bash
+# Run the test script
+python test_websocket.py
+```
+
+### Manual Testing
+1. Start the application
+2. Open browser to `http://localhost:5003`
+3. Use browser console to test WebSocket connections
+4. Monitor server logs for connection events
+
+## 🚨 Troubleshooting
+
+### Common Issues
+
+#### Redis Connection Failed
+```
+⚠️ Redis not available: Connection refused
+🔄 Falling back to in-memory session storage
+```
+**Solution**: 
+- Check Redis server is running
+- Verify Redis URL in configuration
+- For online Redis, ensure SSL is enabled
+
+#### JWT Authentication Failed
+```
+❌ Authentication failed for socket: No token provided
+```
+**Solution**:
+- Ensure JWT token is provided in connection
+- Verify token format and validity
+- Check JWT secret configuration
+
+#### WebSocket Connection Failed
+```
+❌ WebSocket connection failed
+```
+**Solution**:
+- Check server is running on correct port
+- Verify CORS settings
+- Ensure client is using correct WebSocket URL
+
+### Debug Mode
+Enable debug logging:
+```python
+# In config.py
+LOG_LEVEL = 'DEBUG'
+DEBUG = True
+```
+
+### Health Checks
+```bash
+# Test HTTP endpoints
+curl http://localhost:5003/
+
+# Test WebSocket (using wscat)
+npm install -g wscat
+wscat -c "ws://localhost:5003/socket.io/?EIO=4&transport=websocket"
+```
+
+## 📊 Monitoring
+
+### Connection Monitoring
+- Real-time connection status
+- User session tracking
+- Redis health monitoring
+- Error rate tracking
+
+### Performance Metrics
+- Message processing time
+- Redis operation latency
+- WebSocket connection stability
+- Memory usage
+
+## 🔒 Security Features
+
+- JWT token validation
+- Session-based authentication
+- Rate limiting protection
+- Input validation and sanitization
+- Secure file upload handling
+- CORS configuration
+
+## 🚀 Production Deployment
+
+### Environment Setup
+```bash
+# Set production environment
+export FLASK_ENV=production
+
+# Configure production Redis
+export REDIS_URL="redis://prod-redis-url"
+export REDIS_SSL=true
+
+# Set secure JWT secret
+export JWT_SECRET="secure_jwt_secret_here"
+```
+
+### Docker Deployment
+```bash
+# Build and run with Docker
+docker build -t jobmato-chatbot .
+docker run -p 5003:5003 jobmato-chatbot
+```
+
+### Scaling Considerations
+- Use Redis cluster for high availability
+- Implement load balancing for WebSocket connections
+- Monitor memory usage and connection limits
+- Set up proper logging and monitoring
+
+## 📝 License
+
+This project is licensed under the MIT License - see the LICENSE file for details.
+
+## 🤝 Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Add tests if applicable
+5. Submit a pull request
+
+## 📞 Support
+
+For support and questions:
+- Create an issue in the repository
+- Check the troubleshooting section
+- Review the configuration documentation
+
+---
+
+## ✅ Current Status
+
+**Enhanced WebSocket Implementation Complete!**
+
+### 🎯 What's Working:
+- ✅ **Enhanced WebSocket server** running on port 5003
+- ✅ **JWT authentication middleware** implemented
+- ✅ **Redis integration** with online service support
+- ✅ **Session management** with persistence
+- ✅ **Error handling** and recovery mechanisms
+- ✅ **Typing indicators** and real-time communication
+- ✅ **Resume upload** with WebSocket broadcasting
+- ✅ **HTTP endpoints** working correctly
+- ✅ **MongoDB integration** for conversation storage
+- ✅ **Comprehensive logging** and debugging
+
+### 🌐 Online Redis Setup:
+- ✅ **Setup script** for online Redis services
+- ✅ **SSL support** for cloud Redis
+- ✅ **Fallback to in-memory** storage if Redis unavailable
+- ✅ **Multiple Redis providers** supported (Redis Cloud, Upstash, Railway, Render)
+
+### 📋 Next Steps:
+1. **Set up online Redis**: Run `python setup_online_redis.py`
+2. **Configure environment**: Edit `.env` with your API keys
+3. **Test WebSocket**: Use the chat interface at `http://localhost:5003`
+4. **Deploy to production**: Use the provided deployment scripts
+
+**Note**: This enhanced WebSocket implementation provides enterprise-level functionality with proper authentication, session management, and error handling. It's designed to scale and handle production workloads efficiently. 

@@ -11,32 +11,93 @@ class CareerAdviceAgent(BaseAgent):
     def __init__(self, memory_manager=None):
         super().__init__(memory_manager)
         self.llm_client = LLMClient()
-        self.system_message = """You are the JobMato Career Advisor, a friendly and knowledgeable career guidance expert. You can understand and respond in English, Hindi, and Hinglish naturally.
+        self.system_message = """
+        You are the JobMato Career Advisor, a friendly and knowledgeable career guidance expert. You can understand and respond in English, Hindi, and Hinglish naturally.
 
-PERSONALITY TRAITS:
-- Supportive and encouraging mentor
-- Practical and actionable advice giver
-- Match user's language preference (English/Hindi/Hinglish)
-- Use conversation history to provide continuous guidance
-- Remember previous advice given to build upon it
+        PERSONALITY TRAITS:
+        - Supportive and encouraging mentor
+        - Practical and actionable advice giver
+        - Match user's language preference (English/Hindi/Hinglish)
+        - Use conversation history to provide continuous guidance
+        - Remember previous advice given to build upon it
 
-LANGUAGE HANDLING:
-- If user speaks Hinglish, respond in Hinglish with career terms in English
-- If user speaks Hindi, respond in Hindi with professional terms in English
-- If user speaks English, respond in English
-- Use encouraging phrases like "Abhay bhai", "yaar", "boss" for Hinglish users
+        LANGUAGE HANDLING:
+        - If user speaks Hinglish, respond in Hinglish with career terms in English
+        - If user speaks Hindi, respond in Hindi with professional terms in English
+        - If user speaks English, respond in English
+        - Use encouraging phrases like "Abhay bhai", "yaar", "boss" for Hinglish users
 
-ADVICE AREAS:
-- Career path planning and transitions
-- Skill development recommendations
-- Industry insights and trends
-- Professional networking guidance
-- Interview preparation tips
-- Salary negotiation advice
-- Work-life balance strategies
-- Personal branding and LinkedIn optimization
+        ADVICE AREAS:
+        - Career path planning and transitions
+        - Skill development recommendations
+        - Industry insights and trends
+        - Professional networking guidance
+        - Interview preparation tips
+        - Salary negotiation advice
+        - Work-life balance strategies
+        - Personal branding and LinkedIn optimization
 
-Always provide specific, actionable steps and consider the user's background from their profile/resume and conversation history."""
+        Always provide specific, actionable steps and consider the user's background from their profile/resume and conversation history.
+        """
+        self.industry_trends = {
+            "AI & Machine Learning": {
+                "impact": "high",
+                "skills": ["Python", "TensorFlow", "PyTorch", "Machine Learning", "Deep Learning", "NLP", "Computer Vision"],
+                "roles": ["ML Engineer", "AI Researcher", "Data Scientist", "AI Product Manager"],
+                "description": "AI and ML are transforming industries with applications in automation, prediction, and decision-making."
+            },
+            "Remote Work Technologies": {
+                "impact": "high",
+                "skills": ["Cloud Computing", "DevOps", "Collaboration Tools", "Security", "Virtual Infrastructure"],
+                "roles": ["Cloud Architect", "DevOps Engineer", "Remote Team Lead", "Virtual Infrastructure Specialist"],
+                "description": "Remote work technologies are enabling global collaboration and distributed teams."
+            },
+            "Cybersecurity": {
+                "impact": "medium",
+                "skills": ["Security Analysis", "Network Security", "Ethical Hacking", "Risk Assessment", "Compliance"],
+                "roles": ["Security Engineer", "Cybersecurity Analyst", "Security Architect", "Compliance Officer"],
+                "description": "Cybersecurity is crucial for protecting digital assets and ensuring data privacy."
+            }
+        }
+
+    def _extract_user_profile(self, profile_data: Dict[str, Any]) -> Dict[str, Any]:
+        if not profile_data or profile_data.get("error"):
+            return {}
+
+        personal_info = profile_data.get("personalInfo", {})
+        education = profile_data.get("education", [])
+        experience = profile_data.get("workExperience", [])
+        skills = profile_data.get("skills", [])
+
+        return {
+            "name": personal_info.get("fullName"),
+            "email": personal_info.get("email"),
+            "currentRole": personal_info.get("role"),
+            "gender": personal_info.get("gender"),
+            "skills": skills,
+            "education": [
+                {
+                    "course": e.get("course"),
+                    "university": e.get("university"),
+                    "from": e.get("from"),
+                    "to": e.get("to"),
+                    "graduated": e.get("graduated"),
+                    "description": e.get("description")
+                } for e in education
+            ],
+            "experience": [
+                {
+                    "company": w.get("company"),
+                    "role": w.get("role"),
+                    "from": w.get("form_year"),
+                    "to": w.get("to_year"),
+                    "work_here": w.get("work_here"),
+                    "description": w.get("description")
+                } for w in experience
+            ],
+            "socialLinks": profile_data.get("socialLinks", {})
+        }
+
     
     async def provide_advice(self, routing_data: Dict[str, Any]) -> Dict[str, Any]:
         """Provide career advice based on the routing data"""
@@ -56,6 +117,8 @@ Always provide specific, actionable steps and consider the user's background fro
             profile_data = await self.get_profile_data(token, base_url)
             resume_data = await self.get_resume_data(token, base_url)
             
+            user_profile = self._extract_user_profile(profile_data)
+
             # Build comprehensive context for personalized advice
             context = self.build_context_prompt(
                 current_query=original_query,
@@ -84,7 +147,18 @@ Always provide specific, actionable steps and consider the user's background fro
                 'career_advice',
                 advice_response,
                 {
+                    'trends': [
+                        {
+                            'trend': trend_name,
+                            'impact': trend_data['impact'],
+                            'skills': trend_data['skills'],
+                            'roles': trend_data['roles'],
+                            'description': trend_data['description']
+                        }
+                        for trend_name, trend_data in self.industry_trends.items()
+                    ],
                     'category': 'CAREER_ADVICE',
+                    'user_profile': user_profile,
                     'sessionId': session_id,
                     'language': extracted_data.get('language', 'english'),
                     'advice_type': self._classify_advice_type(original_query),

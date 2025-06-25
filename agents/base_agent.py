@@ -2,6 +2,7 @@ import logging
 import requests
 from typing import Dict, Any, Optional
 from abc import ABC, abstractmethod
+from datetime import datetime, timezone
 from utils.jobmato_tools import JobMatoToolsMixin
 
 logger = logging.getLogger(__name__)
@@ -14,41 +15,32 @@ class BaseAgent(ABC, JobMatoToolsMixin):
         self.base_url = "https://backend-v1.jobmato.com"
         self.memory_manager = memory_manager
     
-    async def get_conversation_context(self, session_id: str, limit: int = 5) -> str:
-        """Get recent conversation history for context"""
+    async def get_conversation_context(self, session_id: str, limit: int = 3) -> str:
+        """Get recent conversation history for context (last 3 messages for agents)"""
         if not self.memory_manager:
             return ""
         
         try:
-            # Get last 5 messages for context
-            history = await self.memory_manager.get_conversation_history(session_id, limit=limit)
+            # Get last 3 messages for context using the memory manager
+            history = await self.memory_manager.get_conversation_context_for_agents(session_id, limit=limit)
             if not history:
                 return ""
             
-            # Format context nicely
-            context_lines = []
-            for msg in history[-limit:]:  # Get last N messages
-                if isinstance(msg, dict):
-                    user_msg = msg.get('user_message', '')
-                    bot_msg = msg.get('bot_response', '')
-                    if user_msg:
-                        context_lines.append(f"User: {user_msg}")
-                    if bot_msg:
-                        context_lines.append(f"Assistant: {bot_msg}")
-                elif isinstance(msg, str):
-                    context_lines.append(msg)
-            
-            return "\n".join(context_lines) if context_lines else ""
+            return history
             
         except Exception as e:
             logger.error(f"Error getting conversation context: {str(e)}")
             return ""
     
-    def build_context_prompt(self, current_query: str, session_id: str, 
-                           profile_data: Dict[str, Any] = None, 
-                           resume_data: Dict[str, Any] = None,
-                           conversation_context: str = None,
-                           language: str = "english") -> str:
+    def build_context_prompt(
+        self, 
+        current_query: str, 
+        session_id: str, 
+        profile_data: Dict[str, Any] = None, 
+        resume_data: Dict[str, Any] = None,
+        conversation_context: str = None,
+        language: str = "english"
+    ) -> str:
         """Build a comprehensive context prompt for agents"""
         context_parts = []
         
@@ -76,15 +68,18 @@ class BaseAgent(ABC, JobMatoToolsMixin):
         
         return "\n\n".join(context_parts)
     
-    async def call_api(self, endpoint: str, token: str, method: str = 'GET', 
-                      params: Optional[Dict[str, Any]] = None, 
-                      data: Optional[Dict[str, Any]] = None,
-                      base_url: Optional[str] = None) -> Dict[str, Any]:
+    async def call_api(
+        self, 
+        endpoint: str, 
+        token: str, 
+        method: str = 'GET', 
+        params: Optional[Dict[str, Any]] = None, 
+        data: Optional[Dict[str, Any]] = None,
+        base_url: Optional[str] = None
+    ) -> Dict[str, Any]:
         """Make API calls to JobMato backend"""
         try:
-            # Always use the JobMato backend URL for API calls
-            # The base_url parameter is for WebSocket communication, not JobMato API calls
-            api_base_url = self.base_url  # Always use https://backend-v1.jobmato.com
+            api_base_url = self.base_url
             url = f"{api_base_url}{endpoint}"
             
             headers = {
@@ -129,11 +124,28 @@ class BaseAgent(ABC, JobMatoToolsMixin):
         """Process the request - must be implemented by subclasses"""
         pass
     
-    def create_response(self, response_type: str, content: str, 
-                       metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        """Create a standardized response format"""
+    def create_response(
+        self, 
+        response_type: str, 
+        content: str, 
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """Create a standardized response format with enforced allowed types (except job agent)"""
+        allowed_types = {
+            "plain_text",
+            "markdown",
+            "resume_analysis",
+            "career_advice",
+            "project_suggestion",
+            "resume_upload_required"
+        }
+        if response_type not in allowed_types:
+            raise ValueError(f"Response type '{response_type}' is not allowed. Allowed types: {allowed_types}")
         return {
-            'type': response_type,
-            'content': content,
-            'metadata': metadata or {}
-        } 
+            "content": content.strip(),
+            "type": response_type,
+            "metadata": {
+                "timestamp": datetime.now(timezone.utc).isoformat() + "Z",
+                **(metadata or {})
+            }
+        }

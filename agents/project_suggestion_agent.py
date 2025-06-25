@@ -41,7 +41,7 @@ Always provide specific project ideas with:
 - Timeline estimates and milestones
 - Portfolio presentation tips
 
-Consider user's current skills, career goals, and conversation history for personalized recommendations."""
+Consider user's current skills, career goals, and conversation history for personalized recommendations. Give output in plain text."""
     
     async def suggest_projects(self, routing_data: Dict[str, Any]) -> Dict[str, Any]:
         """Suggest projects based on the routing data"""
@@ -90,20 +90,24 @@ Consider user's current skills, career goals, and conversation history for perso
             # Store conversation in memory for progressive suggestions
             if self.memory_manager:
                 await self.memory_manager.store_conversation(session_id, original_query, suggestions_response)
-            
-            return self.create_response(
-                'project_suggestions',
+
+            final =  self.create_response(
+                'plain_text',
                 suggestions_response,
                 {
                     'category': 'PROJECT_SUGGESTION',
                     'sessionId': session_id,
                     'language': extracted_data.get('language', 'english'),
                     'suggestion_type': self._classify_suggestion_type(original_query),
-                    'skill_level': self._determine_skill_level(profile_data, resume_data),
-                    'has_previous_suggestions': bool(conversation_context and 'project' in conversation_context.lower())
+                    'skillLevel': self._determine_skill_level(profile_data, resume_data),
+                    'has_previous_suggestions': bool(conversation_context and 'project' in conversation_context.lower()),
+                    "focusArea": None,
+                    'suggestedProjects': self._get_sample_projects(self._determine_skill_level(profile_data, resume_data))
                 }
             )
             
+            return final
+        
         except Exception as e:
             logger.error(f"Error suggesting projects: {str(e)}")
             language = routing_data.get('extractedData', {}).get('language', 'english')
@@ -167,6 +171,117 @@ Consider user's current skills, career goals, and conversation history for perso
                 return 'intermediate'
         
         return 'intermediate'  # Default
+    
+    def _get_sample_projects(self, skill_level: str) -> list:
+        """Get sample project suggestions based on skill level"""
+        if skill_level == 'beginner':
+            return [
+                {
+                    'title': 'Personal Portfolio Website',
+                    'description': 'Build a responsive portfolio website using HTML, CSS, and JavaScript to showcase your skills and projects.',
+                    'difficulty': 'beginner',
+                    'learningOutcomes': [
+                        'HTML5 and CSS3 fundamentals',
+                        'Responsive design principles',
+                        'Basic JavaScript functionality',
+                        'Git version control basics'
+                    ]
+                },
+                {
+                    'title': 'Todo List Application',
+                    'description': 'Create a simple todo list app with add, edit, delete, and mark complete functionality.',
+                    'difficulty': 'beginner',
+                    'learningOutcomes': [
+                        'DOM manipulation',
+                        'Event handling',
+                        'Local storage usage',
+                        'Basic CRUD operations'
+                    ]
+                },
+                {
+                    'title': 'Weather App',
+                    'description': 'Build a weather application that fetches data from a weather API and displays current conditions.',
+                    'difficulty': 'beginner',
+                    'learningOutcomes': [
+                        'API integration',
+                        'Async/await concepts',
+                        'JSON data handling',
+                        'Error handling basics'
+                    ]
+                }
+            ]
+        elif skill_level == 'advanced':
+            return [
+                {
+                    'title': 'Full-Stack E-commerce Platform',
+                    'description': 'Develop a complete e-commerce solution with user authentication, payment processing, and admin dashboard.',
+                    'difficulty': 'advanced',
+                    'learningOutcomes': [
+                        'Full-stack development',
+                        'Database design and optimization',
+                        'Payment gateway integration',
+                        'Security best practices'
+                    ]
+                },
+                {
+                    'title': 'Real-time Chat Application',
+                    'description': 'Build a real-time messaging app with WebSocket connections, user presence, and file sharing.',
+                    'difficulty': 'advanced',
+                    'learningOutcomes': [
+                        'WebSocket implementation',
+                        'Real-time data handling',
+                        'File upload and processing',
+                        'Scalable architecture design'
+                    ]
+                },
+                {
+                    'title': 'Machine Learning Model Deployment',
+                    'description': 'Create a web application that serves machine learning models with real-time predictions and model monitoring.',
+                    'difficulty': 'advanced',
+                    'learningOutcomes': [
+                        'ML model deployment',
+                        'API design for ML services',
+                        'Model monitoring and logging',
+                        'Performance optimization'
+                    ]
+                }
+            ]
+        else:  # intermediate
+            return [
+                {
+                    'title': 'Blog Platform with CMS',
+                    'description': 'Develop a content management system for a blog with user authentication, rich text editor, and SEO optimization.',
+                    'difficulty': 'intermediate',
+                    'learningOutcomes': [
+                        'Backend API development',
+                        'Database relationships',
+                        'Authentication and authorization',
+                        'SEO best practices'
+                    ]
+                },
+                {
+                    'title': 'Task Management Dashboard',
+                    'description': 'Create a project management tool with task tracking, team collaboration, and progress visualization.',
+                    'difficulty': 'intermediate',
+                    'learningOutcomes': [
+                        'State management',
+                        'Data visualization',
+                        'Team collaboration features',
+                        'Project planning concepts'
+                    ]
+                },
+                {
+                    'title': 'Social Media Analytics Tool',
+                    'description': 'Build an analytics dashboard that tracks social media metrics and provides insights and reporting.',
+                    'difficulty': 'intermediate',
+                    'learningOutcomes': [
+                        'Data analysis and visualization',
+                        'Third-party API integration',
+                        'Dashboard design principles',
+                        'Reporting and insights generation'
+                    ]
+                }
+            ]
     
     async def process_request(self, routing_data: Dict[str, Any]) -> Dict[str, Any]:
         """Process project suggestion request"""

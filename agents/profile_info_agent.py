@@ -91,7 +91,7 @@ Always provide clear, organized information about the user's profile and suggest
                 await self.memory_manager.store_conversation(session_id, original_query, profile_response)
             
             return self.create_response(
-                'profile_info',
+                'plain_text',
                 profile_response,
                 {
                     'category': 'PROFILE_INFO',

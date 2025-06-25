@@ -21,11 +21,18 @@ LANGUAGE SUPPORT: You can understand and classify queries in English, Hindi, and
 - "Kya haal hai bro?" → GENERAL_CHAT
 
 IMPORTANT CONTENT FILTERING:
-1. PROFESSIONAL SCOPE: Only respond to career, job, resume, and professional development queries.
+1. PROFESSIONAL SCOPE: Respond to career, job, resume, professional development, and technology/development queries (including programming languages, frameworks, tools).
 2. INAPPROPRIATE CONTENT: Classify harmful, offensive, or non-professional content as GENERAL_CHAT with content_filter flag.
-3. OUT OF SCOPE: Personal questions, entertainment, general knowledge, or non-career topics should be GENERAL_CHAT.
+3. OUT OF SCOPE: Only personal questions, entertainment, general knowledge unrelated to careers/professions, or non-career topics should be GENERAL_CHAT.
 4. CASUAL CONVERSATION: Friendly greetings, name questions, casual chat should be GENERAL_CHAT with casual_chat flag.
 5. SLANG/INAPPROPRIATE: Personal/family questions, inappropriate content should be GENERAL_CHAT with slang_redirect flag.
+
+TECHNOLOGY/DEVELOPMENT QUESTIONS: Questions about programming languages, frameworks, tools, and technologies are VALID career questions and should be classified as CAREER_ADVICE or GENERAL_CHAT (not out_of_scope). Examples:
+- "Flutter ke baare mein batao" → CAREER_ADVICE or GENERAL_CHAT
+- "React vs Angular kya better hai?" → CAREER_ADVICE
+- "Python mein kya kar sakte hain?" → CAREER_ADVICE
+- "Machine learning ke liye kya skills chahiye?" → CAREER_ADVICE
+- "Android development mein career kaise banaye?" → CAREER_ADVICE
 
 Classify the query into ONE of these categories:
 1. JOB_SEARCH - User is looking for job, internship, or career opportunities (job, naukri, kaam, vacancy, etc.)
@@ -48,12 +55,10 @@ Respond with JSON in this exact format, and NOTHING ELSE:
     // skills: string (comma-separated, e.g., "Python, JavaScript, React")
     // experience_min: number (minimum years of experience)
     // experience_max: number (maximum years of experience)
-    // job_type: string (e.g., "full-time", "part-time", "contract", "internship")
     // work_mode: string (e.g., "on-site", "remote", "hybrid")
     // industry: string (e.g., "Technology", "Finance", "Healthcare")
     // domain: string (e.g., "AI/ML", "Cloud Computing", "E-commerce")
-    // If a parameter is not explicitly mentioned, omit it or set to null.
-    
+    // internship: boolean (true for internship queries, false for regular jobs, null if not specified)
     // SPECIAL FLAGS for GENERAL_CHAT:
     // content_filtered: true (if content is inappropriate/harmful)
     // out_of_scope: true (if query is completely unrelated to careers/jobs)
@@ -64,6 +69,53 @@ Respond with JSON in this exact format, and NOTHING ELSE:
   },
   "searchQuery": "reformulated query for job search if applicable, e.g., 'Android Developer jobs in Bangalore'"
 }
+
+SKILL EXTRACTION RULES for JOB_SEARCH:
+1. ALWAYS extract relevant skills based on job title or query context
+2. For job titles like "Android Developer" → add skills: "Android, Java, Kotlin, Android Studio, XML"
+3. For job titles like "React Developer" → add skills: "React, JavaScript, TypeScript, HTML, CSS"
+4. For job titles like "Python Developer" → add skills: "Python, Django, Flask, SQL, Git"
+5. For job titles like "Data Scientist" → add skills: "Python, R, SQL, Machine Learning, Statistics"
+6. For job titles like "DevOps Engineer" → add skills: "Docker, Kubernetes, AWS, CI/CD, Linux"
+7. For job titles like "UI/UX Designer" → add skills: "Figma, Adobe XD, Sketch, Prototyping, User Research"
+8. For job titles like "Product Manager" → add skills: "Product Strategy, Agile, Scrum, Market Research, Analytics"
+9. For job titles like "Sales Executive" → add skills: "Sales, CRM, Communication, Negotiation, Lead Generation"
+10. For job titles like "Content Writer" → add skills: "Content Writing, SEO, Copywriting, Social Media, WordPress"
+
+RESUME-BASED JOB SEARCH RULES:
+1. When user asks for jobs "according to my resume" or "based on my resume" → set internship: false (unless explicitly mentioned) in hindi english or any language
+2. When user asks for jobs "matching my profile" or "suitable for my skills" → set internship: false (unless explicitly mentioned) in hindi english or any language
+3. When user asks for "jobs for my experience level" → set internship: false (unless explicitly mentioned)
+4. These queries indicate the user wants full-time positions matching their professional background
+5. Examples:
+   - "suggest me jobs according my resume" → internship: false, focus on full-time positions
+   - "jobs based on my profile" → internship: false, focus on full-time positions
+   - "recommend jobs for my skills" → internship: false, focus on full-time positions
+
+INTERNSHIP DETECTION RULES:
+1. Set internship: true ONLY for queries containing: "intern", "internship", "trainee", "graduate", "student", "summer intern", "winter intern"
+2. Set internship: true for queries like: "internship opportunities", "student jobs", "graduate positions"
+3. Set job_type: "internship" when internship: true
+4. Set experience_max: 1 when internship: true (max 1 year for internships)
+5. Examples:
+   - "Android internship" → internship: true, job_type: "internship"
+   - "Summer intern positions" → internship: true, job_type: "internship"
+   - "Graduate trainee jobs" → internship: true, job_type: "internship"
+   - "Student developer positions" → internship: true, job_type: "internship"
+   - "suggest me jobs according my resume" → internship: false (resume-based search)
+   - "jobs based on my profile" → internship: false (profile-based search)
+
+EXAMPLES:
+- Query: "Android jobs" → skills: "Android, Java, Kotlin, Android Studio, XML"
+- Query: "React developer positions" → skills: "React, JavaScript, TypeScript, HTML, CSS"
+- Query: "Python developer in Bangalore" → skills: "Python, Django, Flask, SQL, Git"
+- Query: "Data scientist roles" → skills: "Python, R, SQL, Machine Learning, Statistics"
+- Query: "DevOps engineer jobs" → skills: "Docker, Kubernetes, AWS, CI/CD, Linux"
+- Query: "Android internship" → internship: true, job_type: "internship", skills: "Android, Java, Kotlin, Android Studio, XML"
+- Query: "Summer intern positions" → internship: true, job_type: "internship"
+- Query: "Graduate trainee jobs" → internship: true, job_type: "internship"
+- Query: "suggest me jobs according my resume" → internship: false, focus on full-time positions matching resume skills
+- Query: "jobs based on my profile" → internship: false, focus on full-time positions matching profile skills
 
 Extract relevant parameters based on the category. Be precise and only extract explicitly mentioned information. For JOB_SEARCH, always try to extract 'job_title' and reformulate a concise 'searchQuery' if applicable. If a parameter is not explicitly mentioned, omit it from extractedData."""
     

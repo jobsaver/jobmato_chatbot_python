@@ -23,14 +23,133 @@
 
         .chat-container {
             width: 90%;
-            max-width: 800px;
+            max-width: 1200px;
             height: 90vh;
             background: white;
             border-radius: 20px;
             box-shadow: 0 20px 60px rgba(0, 0, 0, 0.1);
             display: flex;
+            flex-direction: row;
+            overflow: hidden;
+        }
+
+        .chat-sidebar {
+            width: 300px;
+            background: #f8fafc;
+            border-right: 1px solid #e5e7eb;
+            display: flex;
             flex-direction: column;
             overflow: hidden;
+        }
+
+        .sidebar-header {
+            background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+            color: white;
+            padding: 20px;
+            text-align: center;
+        }
+
+        .sidebar-header h2 {
+            font-size: 1.2rem;
+            margin-bottom: 5px;
+        }
+
+        .sidebar-header p {
+            opacity: 0.9;
+            font-size: 0.8rem;
+        }
+
+        .sessions-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 10px;
+        }
+
+        .session-item {
+            background: white;
+            border: 1px solid #e5e7eb;
+            border-radius: 12px;
+            padding: 15px;
+            margin-bottom: 10px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            position: relative;
+        }
+
+        .session-item:hover {
+            border-color: #4f46e5;
+            box-shadow: 0 2px 8px rgba(79, 70, 229, 0.1);
+        }
+
+        .session-item.active {
+            border-color: #4f46e5;
+            background: #f0f9ff;
+        }
+
+        .session-title {
+            font-weight: 600;
+            color: #374151;
+            margin-bottom: 5px;
+            font-size: 0.9rem;
+        }
+
+        .session-meta {
+            font-size: 0.75rem;
+            color: #6b7280;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .session-actions {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            display: none;
+        }
+
+        .session-item:hover .session-actions {
+            display: flex;
+            gap: 5px;
+        }
+
+        .session-action-btn {
+            background: none;
+            border: none;
+            cursor: pointer;
+            padding: 2px;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            color: #6b7280;
+            transition: color 0.3s ease;
+        }
+
+        .session-action-btn:hover {
+            color: #ef4444;
+        }
+
+        .new-chat-btn {
+            background: linear-gradient(135deg, #4f46e5, #7c3aed);
+            color: white;
+            border: none;
+            padding: 12px 20px;
+            border-radius: 12px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            font-weight: 600;
+            margin: 10px;
+            transition: all 0.3s ease;
+        }
+
+        .new-chat-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(79, 70, 229, 0.3);
+        }
+
+        .chat-main {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
         }
 
         .chat-header {
@@ -61,6 +180,10 @@
             background: #10b981;
             border-radius: 50%;
             animation: pulse 2s infinite;
+        }
+
+        .status-indicator.disconnected {
+            background: #ef4444;
         }
 
         @keyframes pulse {
@@ -338,6 +461,50 @@
             font-size: 0.9rem;
         }
 
+        .job-card a {
+            display: inline-block;
+            margin-top: 8px;
+            padding: 6px 12px;
+            background: #3b82f6;
+            color: white;
+            text-decoration: none;
+            border-radius: 6px;
+            font-size: 0.85rem;
+            transition: background 0.3s ease;
+        }
+
+        .job-card a:hover {
+            background: #2563eb;
+        }
+
+        .job-pagination {
+            text-align: center;
+            margin-top: 15px;
+            padding: 10px;
+        }
+
+        .load-more-btn {
+            background: linear-gradient(135deg, #4f46e5, #7c3aed);
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 25px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            transition: all 0.3s ease;
+        }
+
+        .load-more-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(79, 70, 229, 0.3);
+        }
+
+        .load-more-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
         .welcome-message {
             text-align: center;
             padding: 40px 20px;
@@ -349,12 +516,63 @@
             color: #374151;
         }
 
+        .auth-status {
+            background: #fef3c7;
+            border: 1px solid #f59e0b;
+            border-radius: 12px;
+            padding: 15px;
+            margin: 10px 0;
+            text-align: center;
+            color: #92400e;
+        }
+
+        .auth-status.error {
+            background: #fef2f2;
+            border-color: #ef4444;
+            color: #dc2626;
+        }
+
+        .auth-status.success {
+            background: #f0fdf4;
+            border-color: #22c55e;
+            color: #166534;
+        }
+
+        .session-info {
+            background: #f0f9ff;
+            border: 1px solid #0ea5e9;
+            border-radius: 12px;
+            padding: 10px 15px;
+            margin: 10px 0;
+            font-size: 0.85rem;
+            color: #0369a1;
+        }
+
+        .no-sessions {
+            text-align: center;
+            padding: 40px 20px;
+            color: #6b7280;
+        }
+
+        .no-sessions h3 {
+            margin-bottom: 10px;
+            color: #374151;
+        }
+
         /* Responsive design */
         @media (max-width: 768px) {
             .chat-container {
                 width: 95%;
                 height: 95vh;
                 border-radius: 15px;
+                flex-direction: column;
+            }
+            
+            .chat-sidebar {
+                width: 100%;
+                height: 200px;
+                border-right: none;
+                border-bottom: 1px solid #e5e7eb;
             }
             
             .chat-header h1 {
@@ -373,48 +591,58 @@
 </head>
 <body>
     <div class="chat-container">
-        <div class="chat-header">
-            <div class="status-indicator"></div>
-            <h1>🎯 JobMato Assistant</h1>
-            <p>Your AI-powered career companion</p>
+        <div class="chat-sidebar">
+            <div class="sidebar-header">
+                <h2>Sessions</h2>
+                <p>Manage your conversations</p>
+            </div>
+            <div class="sessions-list"></div>
         </div>
         
-        <div class="chat-messages" id="chatMessages">
-            <div class="welcome-message">
-                <h3>Welcome to JobMato Assistant! 👋</h3>
-                <p>I'm here to help you with job searching, career advice, resume analysis, and project suggestions.</p>
-                <p>What can I help you with today?</p>
+        <div class="chat-main">
+            <div class="chat-header">
+                <div class="status-indicator" id="statusIndicator"></div>
+                <h1>🎯 JobMato Assistant</h1>
+                <p>Your AI-powered career companion</p>
             </div>
-        </div>
-        
-        <div class="typing-indicator" id="typingIndicator">
-            <div class="typing-dots">
-                <span></span>
-                <span></span>
-                <span></span>
+            
+            <div class="chat-messages" id="chatMessages">
+                <div class="welcome-message">
+                    <h3>Welcome to JobMato Assistant! 👋</h3>
+                    <p>I'm here to help you with job searching, career advice, resume analysis, and project suggestions.</p>
+                    <p>What can I help you with today?</p>
+                </div>
             </div>
-        </div>
-        
-        <div class="chat-input-container">
-            <div class="input-wrapper">
-                <input type="file" id="fileInput" class="file-input" accept=".pdf,.doc,.docx" />
-                <button id="uploadButton" class="upload-button hide" title="Upload Resume">
-                    📄
-                </button>
-                <textarea 
-                    id="messageInput" 
-                    class="chat-input" 
-                    placeholder="Ask me about jobs, career advice, resume tips, or project ideas..."
-                    rows="1"
-                ></textarea>
-                <button id="sendButton" class="send-button">
-                    ➤
-                </button>
+            
+            <div class="typing-indicator" id="typingIndicator">
+                <div class="typing-dots">
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                </div>
             </div>
-            <div id="uploadProgress" class="upload-progress">
-                <div id="uploadText">Uploading resume...</div>
-                <div class="progress-bar">
-                    <div id="progressBarFill" class="progress-bar-fill"></div>
+            
+            <div class="chat-input-container">
+                <div class="input-wrapper">
+                    <input type="file" id="fileInput" class="file-input" accept=".pdf,.doc,.docx" />
+                    <button id="uploadButton" class="upload-button hide" title="Upload Resume">
+                        📄
+                    </button>
+                    <textarea 
+                        id="messageInput" 
+                        class="chat-input" 
+                        placeholder="Ask me about jobs, career advice, resume tips, or project ideas..."
+                        rows="1"
+                    ></textarea>
+                    <button id="sendButton" class="send-button">
+                        ➤
+                    </button>
+                </div>
+                <div id="uploadProgress" class="upload-progress">
+                    <div id="uploadText">Uploading resume...</div>
+                    <div class="progress-bar">
+                        <div id="progressBarFill" class="progress-bar-fill"></div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -435,76 +663,193 @@
                 this.uploadText = document.getElementById('uploadText');
                 this.progressBarFill = document.getElementById('progressBarFill');
                 this.typingIndicator = document.getElementById('typingIndicator');
-                this.sessionId = this.generateSessionId();
+                this.statusIndicator = document.getElementById('statusIndicator');
+                this.sessionId = null;
+                this.userId = null;
                 this.socket = null;
                 this.connected = false;
-                
+                this.authenticated = false;
+                this.jwtToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjY4NDcxMDBlYTQxN2IwMGEyMGYzZjA1MSIsImVtYWlsIjoiaGFja3lhYmhheUBnbWFpbC5jb20iLCJpYXQiOjE3NTA1Nzk4MDYsImV4cCI6MTc1MTE4NDYwNn0.5cMF3TDItaJt7JPONtHEF3lAe-qgL8Q8ujwMagC1fVo';
                 this.initializeWebSocket();
                 this.initializeEventListeners();
                 this.autoResizeTextarea();
+                this.fetchSessions(); // Load sessions on startup
             }
-            
-            generateSessionId() {
-                return 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+
+            async fetchSessions() {
+                try {
+                    console.log('🔍 Fetching sessions...');
+                    const res = await fetch('/api/sessions', {
+                        headers: { 'Authorization': 'Bearer ' + this.jwtToken }
+                    });
+                    console.log('📡 API Response status:', res.status);
+                    const data = await res.json();
+                    console.log('📋 Sessions data:', data);
+                    if (data.success) {
+                        console.log('✅ Rendering sessions list with', data.sessions.length, 'sessions');
+                        this.renderSessionsList(data.sessions);
+                    } else {
+                        console.error('❌ Failed to fetch sessions:', data.message);
+                    }
+                } catch (e) {
+                    console.error('❌ Failed to fetch sessions:', e);
+                }
+            }
+
+            async fetchChatHistory(sessionId) {
+                try {
+                    const res = await fetch(`/api/history/${sessionId}`, {
+                        headers: { 'Authorization': 'Bearer ' + this.jwtToken }
+                    });
+                    const data = await res.json();
+                    if (data.success) {
+                        this.loadChatHistory(data.data);
+                    }
+                } catch (e) {
+                    console.error('Failed to fetch chat history:', e);
+                }
+            }
+
+            renderSessionsList(sessions) {
+                console.log('🎨 Rendering sessions list:', sessions);
+                const sessionsList = document.querySelector('.sessions-list');
+                console.log('📋 Sessions list element:', sessionsList);
+                sessionsList.innerHTML = '';
+                // New Chat button
+                const newChatBtn = document.createElement('button');
+                newChatBtn.className = 'new-chat-btn';
+                newChatBtn.textContent = 'New Chat';
+                newChatBtn.onclick = () => this.createNewSession();
+                sessionsList.appendChild(newChatBtn);
+                console.log('➕ Added New Chat button');
+                // Session items
+                sessions.forEach(session => {
+                    console.log('📝 Creating session item for:', session);
+                    const sessionItem = document.createElement('div');
+                    sessionItem.className = 'session-item' + (session.sessionId === this.sessionId ? ' active' : '');
+                    sessionItem.onclick = () => {
+                        this.sessionId = session.sessionId;
+                        this.fetchChatHistory(session.sessionId);
+                        this.updateActiveSession(session.sessionId);
+                    };
+                    sessionItem.innerHTML = `
+                        <div class="session-title">${session.title || 'Untitled Chat'}</div>
+                        <div class="session-meta">
+                            <span>${session.messageCount || 0} messages</span>
+                            <div class="session-actions">
+                                <button class="session-action-btn" onclick="event.stopPropagation(); chatbot.deleteSession('${session.sessionId}')">Delete</button>
+                            </div>
+                        </div>
+                    `;
+                    sessionsList.appendChild(sessionItem);
+                    console.log('✅ Added session item:', session.sessionId);
+                });
+                console.log('🎯 Finished rendering sessions list');
+            }
+
+            createNewSession() {
+                // Use WebSocket to create a new session, then refresh sessions list
+                if (this.socket) {
+                    this.socket.emit('init_chat', {});
+                    setTimeout(() => this.fetchSessions(), 1000); // Give backend time to create
+                }
             }
 
             initializeWebSocket() {
-                // Initialize Socket.IO connection
-                this.socket = io();
+                // Initialize Socket.IO connection with authentication
+                this.socket = io({
+                    query: { token: this.jwtToken },
+                    transports: ['websocket', 'polling'],
+                    timeout: 60000
+                });
                 
                 // Connection event handlers
-                this.socket.on('connect', (data) => {
-                    console.log('🔌 Connected to server:', data);
+                this.socket.on('connect', () => {
+                    console.log('🔌 Connected to server');
                     this.connected = true;
-                    this.socket.emit('join_session', { session_id: this.sessionId });
+                    this.updateConnectionStatus(true);
                 });
                 
                 this.socket.on('disconnect', () => {
                     console.log('🔌 Disconnected from server');
                     this.connected = false;
+                    this.authenticated = false;
+                    this.updateConnectionStatus(false);
                 });
                 
-                this.socket.on('session_joined', (data) => {
-                    console.log('🏠 Joined session:', data.session_id);
+                // Authentication event handlers
+                this.socket.on('auth_status', (data) => {
+                    console.log('🔐 Authentication status:', data);
+                    if (data.authenticated) {
+                        this.authenticated = true;
+                        this.userId = data.userId;
+                        this.showAuthStatus('✅ Authenticated successfully', 'success');
+                        this.initializeChat();
+                    } else {
+                        this.authenticated = false;
+                        this.showAuthStatus('❌ Authentication failed', 'error');
+                    }
                 });
                 
-                // Chat event handlers
-                this.socket.on('chat_response', (data) => {
-                    console.log('💬 Received response:', data);
+                this.socket.on('auth_error', (data) => {
+                    console.error('❌ Authentication error:', data);
+                    this.authenticated = false;
+                    this.showAuthStatus('❌ Authentication error: ' + data.message, 'error');
+                });
+                
+                // Session event handlers
+                this.socket.on('session_status', (data) => {
+                    console.log('📋 Session status:', data);
+                    if (data.connected) {
+                        this.sessionId = data.sessionId;
+                        this.showSessionInfo(`Session: ${data.sessionId}`);
+                    } else {
+                        this.showAuthStatus('❌ Session initialization failed: ' + data.error, 'error');
+                    }
+                });
+                
+                this.socket.on('init_response', (data) => {
+                    console.log('🚀 Chat initialized:', data);
+                });
+                
+                // Message event handlers
+                this.socket.on('receive_message', (data) => {
+                    console.log('💬 Received message:', data);
                     this.hideTypingIndicator();
-                    this.addMessage(data.response.content, 'assistant', data.response);
+                    this.addMessage(data.content, 'assistant', data);
+                    
+                    // Track job search state for pagination
+                    if (data.type === 'job_card' && data.metadata) {
+                        this.currentSearchQuery = data.metadata.searchQuery || '';
+                        this.hasMoreJobs = data.metadata.hasMore || false;
+                        if (data.metadata.isFollowUp) {
+                            this.currentPage = data.metadata.currentPage || 1;
+                            // Re-enable load more button for follow-up responses
+                            this.updateLoadMoreButton();
+                        } else {
+                            this.currentPage = 1; // Reset for new search
+                        }
+                        console.log(`Job search state: hasMore=${this.hasMoreJobs}, page=${this.currentPage}, query="${this.currentSearchQuery}"`);
+                    }
                     
                     // Check if response suggests uploading resume
-                    this.checkForUploadSuggestion(data.response);
+                    this.checkForUploadSuggestion(data);
                     
                     this.sendButton.disabled = false;
                     this.messageInput.focus();
                 });
                 
-                this.socket.on('upload_complete', (data) => {
-                    console.log('📤 Upload complete:', data);
-                    this.hideUploadProgress();
-                    if (data.success) {
-                        this.showUploadMessage('✅ Resume uploaded successfully!', false);
-                        this.hideUploadButton();
+                // Typing status handlers
+                this.socket.on('typing_status', (data) => {
+                    console.log('📝 Typing status:', data);
+                    if (data.isTyping) {
+                        this.showTypingIndicator();
                     } else {
-                        this.showUploadMessage('❌ Upload failed: ' + data.error, true);
+                        this.hideTypingIndicator();
                     }
                 });
                 
-                this.socket.on('upload_progress', (data) => {
-                    console.log('📊 Upload progress:', data);
-                    this.updateUploadProgress(data.progress);
-                });
-                
-                this.socket.on('typing_start', () => {
-                    this.showTypingIndicator();
-                });
-                
-                this.socket.on('typing_stop', () => {
-                    this.hideTypingIndicator();
-                });
-                
+                // Error handlers
                 this.socket.on('error', (data) => {
                     console.error('❌ Socket error:', data);
                     this.hideTypingIndicator();
@@ -513,16 +858,80 @@
                     this.messageInput.focus();
                 });
                 
-                // Session management handlers
-                this.socket.on('session_history', (data) => {
-                    console.log('📜 Session history:', data);
-                    // Handle session history if needed
+                // Health check handlers
+                this.socket.on('pong', () => {
+                    console.log('🏓 Pong received');
                 });
                 
+                // Available agents handler
+                this.socket.on('available_agents', (data) => {
+                    console.log('🤖 Available agents:', data);
+                });
+                
+                // Chat history handler
+                this.socket.on('chat_history', (data) => {
+                    console.log('📜 Chat history:', data);
+                    if (data.messages && data.messages.length > 0) {
+                        this.loadChatHistory(data.messages);
+                    }
+                });
+                
+                // Session management handlers
                 this.socket.on('session_cleared', (data) => {
                     console.log('🗑️ Session cleared:', data.message);
                     this.clearChatMessages();
                 });
+                
+                // User sessions handler
+                this.socket.on('user_sessions', (data) => {
+                    console.log('📋 User sessions received:', data);
+                    if (data.sessions) {
+                        this.renderSessionsList(data.sessions);
+                    }
+                });
+                
+                // Session loaded handler
+                this.socket.on('session_loaded', (data) => {
+                    console.log('📂 Session loaded:', data);
+                    if (data.sessionId) {
+                        this.updateActiveSession(data.sessionId);
+                        this.loadChatHistory(data.messages || []);
+                    }
+                });
+                
+                // Session deleted handler
+                this.socket.on('session_deleted', (data) => {
+                    console.log('🗑️ Session deleted:', data);
+                    if (data.success) {
+                        // Reload sessions list
+                        this.fetchSessions();
+                        // If the deleted session was active, create a new one
+                        if (data.sessionId === this.sessionId) {
+                            this.createNewSession();
+                        }
+                    }
+                });
+                
+                // Session title updated handler
+                this.socket.on('session_title_updated', (data) => {
+                    console.log('✏️ Session title updated:', data);
+                    if (data.success) {
+                        // Reload sessions list to show updated title
+                        this.fetchSessions();
+                    }
+                });
+            }
+            
+            initializeChat() {
+                // Initialize chat session
+                this.socket.emit('init_chat', {
+                    sessionId: this.sessionId // Optional, will create new if not provided
+                });
+                
+                // Load user sessions after initialization
+                setTimeout(() => {
+                    this.fetchSessions();
+                }, 1000);
             }
             
             initializeEventListeners() {
@@ -535,6 +944,13 @@
                         this.sendMessage();
                     }
                 });
+                
+                // Start ping/pong for connection health
+                setInterval(() => {
+                    if (this.connected && this.authenticated) {
+                        this.socket.emit('ping');
+                    }
+                }, 30000); // Ping every 30 seconds
             }
             
             autoResizeTextarea() {
@@ -546,7 +962,7 @@
             
             sendMessage() {
                 const message = this.messageInput.value.trim();
-                if (!message || !this.connected) return;
+                if (!message || !this.connected || !this.authenticated) return;
                 
                 // Clear input and disable button
                 this.messageInput.value = '';
@@ -556,12 +972,66 @@
                 // Add user message
                 this.addMessage(message, 'user');
                 
+                // Send typing status
+                this.socket.emit('typing_status', { isTyping: true });
+                
                 // Send message via WebSocket
-                this.socket.emit('chat_message', {
-                    message: message,
-                    session_id: this.sessionId,
-                    token: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjY4NDcxMDBlYTQxN2IwMGEyMGYzZjA1MSIsImVtYWlsIjoiaGFja3lhYmhheUBnbWFpbC5jb20iLCJpYXQiOjE3NTA1Nzk4MDYsImV4cCI6MTc1MTE4NDYwNn0.5cMF3TDItaJt7JPONtHEF3lAe-qgL8Q8ujwMagC1fVo', // In production, this should be a real token
-                    baseUrl: 'http://localhost:5001'
+                this.socket.emit('send_message', {
+                    message: message
+                });
+            }
+            
+            updateConnectionStatus(connected) {
+                if (connected) {
+                    this.statusIndicator.classList.remove('disconnected');
+                } else {
+                    this.statusIndicator.classList.add('disconnected');
+                }
+            }
+            
+            showAuthStatus(message, type = 'info') {
+                const statusDiv = document.createElement('div');
+                statusDiv.className = `auth-status ${type}`;
+                statusDiv.textContent = message;
+                
+                this.chatMessages.appendChild(statusDiv);
+                this.scrollToBottom();
+                
+                // Auto-remove after 5 seconds
+                setTimeout(() => {
+                    if (statusDiv.parentNode) {
+                        statusDiv.parentNode.removeChild(statusDiv);
+                    }
+                }, 5000);
+            }
+            
+            showSessionInfo(info) {
+                const infoDiv = document.createElement('div');
+                infoDiv.className = 'session-info';
+                infoDiv.textContent = info;
+                
+                this.chatMessages.appendChild(infoDiv);
+                this.scrollToBottom();
+                
+                // Auto-remove after 3 seconds
+                setTimeout(() => {
+                    if (infoDiv.parentNode) {
+                        infoDiv.parentNode.removeChild(infoDiv);
+                    }
+                }, 3000);
+            }
+            
+            loadChatHistory(messages) {
+                // Clear existing messages except welcome
+                const welcomeMessage = this.chatMessages.querySelector('.welcome-message');
+                this.chatMessages.innerHTML = '';
+                if (welcomeMessage) {
+                    this.chatMessages.appendChild(welcomeMessage);
+                }
+                
+                // Load history messages
+                messages.forEach(msg => {
+                    this.addMessage(msg.content, msg.sender === 'user' ? 'user' : 'assistant');
                 });
             }
             
@@ -588,6 +1058,8 @@
                 // Handle different response types
                 if (fullResponse && fullResponse.type === 'job_card' && fullResponse.metadata && fullResponse.metadata.jobs) {
                     messageContent.innerHTML = this.formatJobResponse(content, fullResponse.metadata.jobs);
+                } else if (fullResponse && fullResponse.type === 'resume_upload_success') {
+                    messageContent.innerHTML = this.formatResumeUploadSuccess(content, fullResponse.metadata);
                 } else {
                     messageContent.innerHTML = this.formatTextContent(content);
                 }
@@ -608,23 +1080,48 @@
                 let html = `<p>${content}</p>`;
                 
                 if (jobs && jobs.length > 0) {
-                    jobs.slice(0, 3).forEach(job => { // Show only first 3 jobs
+                    jobs.forEach(job => {
                         html += `
                             <div class="job-card">
-                                <h4>${job.title || job.job_title || 'Job Title'}</h4>
+                                <h4>${job.job_title || job.title || 'Job Title'}</h4>
                                 <p><strong>Company:</strong> ${job.company || 'Not specified'}</p>
-                                <p><strong>Location:</strong> ${job.location || 'Not specified'}</p>
+                                <p><strong>Location:</strong> ${job.location || (job.locations && job.locations.length > 0 ? job.locations.join(', ') : 'Not specified')}</p>
                                 <p><strong>Experience:</strong> ${job.experience || 'Not specified'}</p>
                                 ${job.salary ? `<p><strong>Salary:</strong> ${job.salary}</p>` : ''}
-                                ${job.workMode || job.work_mode ? `<p><strong>Work Mode:</strong> ${job.workMode || job.work_mode}</p>` : ''}
-                                ${job.skills && job.skills.length > 0 ? `<p><strong>Skills:</strong> ${job.skills.slice(0, 3).join(', ')}</p>` : ''}
+                                ${job.work_mode ? `<p><strong>Work Mode:</strong> ${job.work_mode}</p>` : ''}
+                                ${job.job_type ? `<p><strong>Job Type:</strong> ${job.job_type}</p>` : ''}
+                                ${job.skills && job.skills.length > 0 ? `<p><strong>Skills:</strong> ${job.skills.slice(0, 5).join(', ')}${job.skills.length > 5 ? '...' : ''}</p>` : ''}
+                                ${job.description ? `<p><strong>Description:</strong> ${job.description.length > 150 ? job.description.substring(0, 150) + '...' : job.description}</p>` : ''}
+                                ${job.posted_date ? `<p><strong>Posted:</strong> ${new Date(job.posted_date).toLocaleDateString()}</p>` : ''}
+                                ${job.apply_url ? `<p><a href="${job.apply_url}" target="_blank" style="color: #3b82f6; text-decoration: none;">Apply Now →</a></p>` : ''}
                             </div>
                         `;
                     });
                     
-                    if (jobs.length > 3) {
-                        html += `<p style="margin-top: 10px; font-style: italic;">And ${jobs.length - 3} more jobs...</p>`;
+                    // Add pagination controls if there are more jobs
+                    if (this.hasMoreJobs) {
+                        html += `
+                            <div class="job-pagination">
+                                <button class="load-more-btn" onclick="chatbot.loadMoreJobs()">
+                                    Load More Jobs
+                                </button>
+                            </div>
+                        `;
                     }
+                }
+                
+                return html;
+            }
+            
+            formatResumeUploadSuccess(content, metadata) {
+                let html = `<p>${content}</p>`;
+                
+                if (metadata && metadata.availableOptions) {
+                    html += `<div style="margin-top: 15px;"><strong>Available options:</strong><ul>`;
+                    metadata.availableOptions.forEach(option => {
+                        html += `<li>${option}</li>`;
+                    });
+                    html += `</ul></div>`;
                 }
                 
                 return html;
@@ -711,8 +1208,8 @@
                 
                 const formData = new FormData();
                 formData.append('resume', file);
-                formData.append('session_id', this.sessionId);
-                formData.append('token', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjY4NDcxMDBlYTQxN2IwMGEyMGYzZjA1MSIsImVtYWlsIjoiaGFja3lhYmhheUBnbWFpbC5jb20iLCJpYXQiOjE3NTA1Nzk4MDYsImV4cCI6MTc1MTE4NDYwNn0.5cMF3TDItaJt7JPONtHEF3lAe-qgL8Q8ujwMagC1fVo');
+                formData.append('session_id', this.sessionId || 'default');
+                formData.append('token', this.jwtToken);
                 
                 // Use XMLHttpRequest for upload progress tracking
                 const xhr = new XMLHttpRequest();
@@ -731,7 +1228,6 @@
                             this.hideUploadProgress();
                             if (response.success) {
                                 this.showUploadMessage('✅ Resume uploaded successfully!', false);
-                                this.addMessage('I\'ve uploaded your resume. How can I help you with it?', 'assistant');
                                 this.hideUploadButton();
                             } else {
                                 this.showUploadMessage('❌ Upload failed: ' + response.error, true);
@@ -792,11 +1288,187 @@
                     }
                 }, 5000);
             }
+            
+            updateLoadMoreButton() {
+                const loadMoreBtn = document.querySelector('.load-more-btn');
+                if (loadMoreBtn) {
+                    if (this.hasMoreJobs) {
+                        loadMoreBtn.disabled = false;
+                        loadMoreBtn.textContent = 'Load More Jobs';
+                    } else {
+                        loadMoreBtn.disabled = true;
+                        loadMoreBtn.textContent = 'No More Jobs';
+                    }
+                }
+            }
+            
+            loadMoreJobs() {
+                if (!this.hasMoreJobs || !this.currentSearchQuery) {
+                    console.log('No more jobs to load or no search query');
+                    return;
+                }
+                
+                console.log(`Loading more jobs for query: "${this.currentSearchQuery}", page: ${this.currentPage + 1}`);
+                
+                // Disable the load more button
+                const loadMoreBtn = document.querySelector('.load-more-btn');
+                if (loadMoreBtn) {
+                    loadMoreBtn.disabled = true;
+                    loadMoreBtn.textContent = 'Loading...';
+                }
+                
+                // Send load more request
+                this.socket.emit('load_more_jobs', {
+                    page: this.currentPage + 1,
+                    searchQuery: this.currentSearchQuery
+                });
+                
+                // Set a timeout to re-enable button if no response
+                setTimeout(() => {
+                    if (loadMoreBtn && loadMoreBtn.textContent === 'Loading...') {
+                        loadMoreBtn.disabled = false;
+                        loadMoreBtn.textContent = 'Load More Jobs';
+                        console.log('Load more request timed out, re-enabling button');
+                    }
+                }, 10000); // 10 second timeout
+            }
+            
+            // Session Management Methods
+            loadUserSessions() {
+                console.log('📋 Loading user sessions...');
+                this.socket.emit('get_user_sessions');
+            }
+            
+            loadSession(sessionId) {
+                console.log(`📂 Loading session: ${sessionId}`);
+                this.socket.emit('load_session', { sessionId: sessionId });
+            }
+            
+            deleteSession(sessionId) {
+                if (confirm('Are you sure you want to delete this session? This action cannot be undone.')) {
+                    console.log(`🗑️ Deleting session: ${sessionId}`);
+                    this.socket.emit('delete_session', { sessionId: sessionId });
+                }
+            }
+            
+            updateSessionTitle(sessionId, newTitle) {
+                console.log(`✏️ Updating session title: ${sessionId} -> ${newTitle}`);
+                this.socket.emit('update_session_title', { 
+                    sessionId: sessionId, 
+                    title: newTitle 
+                });
+            }
+            
+            createNewSession() {
+                console.log('🆕 Creating new session...');
+                this.socket.emit('init_chat', {});
+            }
+            
+            renderSessionsList(sessions) {
+                const sessionsList = document.getElementById('sessions-list');
+                if (!sessionsList) return;
+                
+                sessionsList.innerHTML = '';
+                
+                // Add "New Chat" button
+                const newChatBtn = document.createElement('div');
+                newChatBtn.className = 'session-item new-chat';
+                newChatBtn.innerHTML = `
+                    <div class="session-content">
+                        <div class="session-title">➕ New Chat</div>
+                        <div class="session-meta">Start a new conversation</div>
+                    </div>
+                `;
+                newChatBtn.addEventListener('click', () => this.createNewSession());
+                sessionsList.appendChild(newChatBtn);
+                
+                // Add existing sessions
+                sessions.forEach(session => {
+                    const sessionItem = document.createElement('div');
+                    sessionItem.className = 'session-item';
+                    sessionItem.dataset.sessionId = session.session_id;
+                    
+                    const isActive = session.session_id === this.sessionId;
+                    if (isActive) {
+                        sessionItem.classList.add('active');
+                    }
+                    
+                    sessionItem.innerHTML = `
+                        <div class="session-content">
+                            <div class="session-title">${session.title || 'Untitled Chat'}</div>
+                            <div class="session-meta">
+                                ${session.message_count || 0} messages • ${this.formatDate(session.last_updated || session.created_at)}
+                            </div>
+                        </div>
+                        <div class="session-actions">
+                            <button class="edit-title-btn" title="Edit title">✏️</button>
+                            <button class="delete-session-btn" title="Delete session">🗑️</button>
+                        </div>
+                    `;
+                    
+                    // Add click handler for session selection
+                    sessionItem.querySelector('.session-content').addEventListener('click', () => {
+                        if (!isActive) {
+                            this.loadSession(session.session_id);
+                        }
+                    });
+                    
+                    // Add edit title handler
+                    sessionItem.querySelector('.edit-title-btn').addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        this.editSessionTitle(session.session_id, session.title || 'Untitled Chat');
+                    });
+                    
+                    // Add delete handler
+                    sessionItem.querySelector('.delete-session-btn').addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        this.deleteSession(session.session_id);
+                    });
+                    
+                    sessionsList.appendChild(sessionItem);
+                });
+            }
+            
+            editSessionTitle(sessionId, currentTitle) {
+                const newTitle = prompt('Enter new session title:', currentTitle);
+                if (newTitle && newTitle.trim() && newTitle.trim() !== currentTitle) {
+                    this.updateSessionTitle(sessionId, newTitle.trim());
+                }
+            }
+            
+            formatDate(dateString) {
+                const date = new Date(dateString);
+                const now = new Date();
+                const diffInHours = (now - date) / (1000 * 60 * 60);
+                
+                if (diffInHours < 1) {
+                    return 'Just now';
+                } else if (diffInHours < 24) {
+                    return `${Math.floor(diffInHours)}h ago`;
+                } else if (diffInHours < 168) { // 7 days
+                    return `${Math.floor(diffInHours / 24)}d ago`;
+                } else {
+                    return date.toLocaleDateString();
+                }
+            }
+            
+            updateActiveSession(sessionId) {
+                // Update active session indicator
+                document.querySelectorAll('.session-item').forEach(item => {
+                    item.classList.remove('active');
+                    if (item.dataset.sessionId === sessionId) {
+                        item.classList.add('active');
+                    }
+                });
+                
+                this.sessionId = sessionId;
+                console.log(`✅ Active session updated: ${sessionId}`);
+            }
         }
         
         // Initialize the chatbot when the page loads
         document.addEventListener('DOMContentLoaded', () => {
-            new JobMatoChatbot();
+            window.chatbot = new JobMatoChatbot();
         });
     </script>
 </body>

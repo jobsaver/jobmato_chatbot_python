@@ -1,6 +1,6 @@
 import logging
 import random
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from .base_agent import BaseAgent
 from utils.llm_client import LLMClient
 from utils.memory_manager import MemoryManager
@@ -116,8 +116,10 @@ PROFESSIONAL SCOPE: You specialize in:
 - Interview preparation
 - Salary and compensation discussions
 - Workplace advice and professional conduct
+- Technology and development guidance (programming languages, frameworks, tools)
 
 CONTENT BOUNDARIES:
+- For technology questions: Provide helpful information about programming languages, frameworks, and development tools
 - For out-of-scope topics: Respond with humor but redirect to career topics
 - Never be rude or dismissive - always friendly
 - Don't engage with inappropriate content - redirect professionally
@@ -148,14 +150,20 @@ Handle conversations naturally while steering toward professional development. I
             original_query = routing_data.get('originalQuery', '')
             session_id = routing_data.get('sessionId', 'default')
             extracted_data = routing_data.get('extractedData', {})
+
+            profile_data = await self.get_profile_data(token, base_url)
             
             # Check for content filtering flags
             if extracted_data.get('content_filtered'):
                 return self._get_filtered_response()
             
+            # Handle technology/development questions (like Flutter, React, etc.)
+            if self._is_technology_question(original_query):
+                return await self._handle_technology_question(original_query, extracted_data.get('language', 'english'))
+            
             # Handle casual chat (name questions, greetings, etc.)
             if extracted_data.get('casual_chat'):
-                return self._handle_casual_chat(original_query, extracted_data.get('language', 'english'))
+                return self._handle_casual_chat(original_query, extracted_data.get('language', 'english'), profile_data)
             
             # Handle slang/inappropriate questions
             if extracted_data.get('slang_redirect'):
@@ -179,8 +187,8 @@ Handle conversations naturally while steering toward professional development. I
                 return self._get_varied_out_of_scope_response(extracted_data.get('language', 'english'))
             
             # Get conversation history
-            conversation_history = ""
-            if self.memory_manager:
+            conversation_history = routing_data.get('conversation_context', '')
+            if not conversation_history and self.memory_manager:
                 conversation_history = await self.memory_manager.get_conversation_history(session_id)
             
             # Intelligently determine which tools to use based on query
@@ -244,9 +252,10 @@ Handle conversations naturally while steering toward professional development. I
                 {'error': str(e)}
             )
     
-    def _handle_casual_chat(self, query: str, language: str) -> Dict[str, Any]:
+    def _handle_casual_chat(self, query: str, language: str, profile_data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Handle casual chat like name questions, greetings"""
         query_lower = query.lower()
+        user_name = profile_data.get("personalInfo", {}).get("fullName") if profile_data else "yaar"
         
         # Handle slang/inappropriate questions with humor
         if any(word in query_lower for word in [
@@ -273,19 +282,24 @@ Handle conversations naturally while steering toward professional development. I
                 {'chat_type': 'hobby_redirect', 'language': language}
             )
         
-        # Handle name questions
-        elif any(word in query_lower for word in ['name', 'naam', 'tumhara naam', 'your name', 'who are you', 'kaun ho', 'tera naam', 'mera naam']):
-            # Check if user is asking about their own name or the assistant's name
-            if any(word in query_lower for word in ['mera naam', 'my name', 'tumko pata hai', 'you know']):
-                if language == 'hindi':
-                    response = "Haan, aapka naam Abhay hai! 😊 Main aapko yaad rakhta hoon. Ab batao, kya career help chahiye?"
-                elif language == 'hinglish':
-                    response = "Haan yaar, tumhara naam Abhay hai! 😊 Main remember karta hoon. Ab batao, kya career goals hain?"
-                else:
-                    response = "Yes, your name is Abhay! 😊 I remember you. Now, what career goals can I help you with?"
+        elif query_lower in ['hi', 'hello', 'hey', 'how are you', 'hi how are you']:
+            if language == 'hindi':
+                response = "Namaste! Main theek hoon. Aap kaise ho? 😊 Career ke baare mein kuch poochhna hai?"
+            elif language == 'hinglish':
+                response = "Heyy! Main mast hoon yaar 😄 Tum sunao, kya chal raha hai? Kya career advice chahiye?"
             else:
-                response = self._get_varied_response(self.name_responses)
-        # Handle when user provides their name
+                response = "Hey! I'm doing great 😊 How about you? Ready to talk career stuff?"
+            return self.create_response('plain_text', response, {'chat_type': 'greeting', 'language': language})
+        
+
+        elif any(word in query_lower for word in ['mera naam', 'my name', 'tumko pata hai', 'you know']):
+            if language == 'hindi':
+                response = f"Haan, aapka naam {user_name} hai! 😊 Main aapko yaad rakhta hoon. Ab batao, kya career help chahiye?"
+            elif language == 'hinglish':
+                response = f"Haan yaar, tumhara naam {user_name} hai! 😊 Main remember karta hoon. Ab batao, kya career goals hain?"
+            else:
+                response = f"Yes, your name is {user_name}! 😊 I remember you. Now, what career goals can I help you with?"
+        
         elif any(name in query_lower for name in ['abhay', 'my name is', 'mera naam']):
             if language == 'hindi':
                 response = "Nice to meet you, Abhay! 🙏 Main aapka career companion hoon. Kya career goals hain aapke?"
@@ -317,7 +331,6 @@ Handle conversations naturally while steering toward professional development. I
         else:
             # Handle other casual chat
             response = self._get_varied_response(self.casual_responses)
-        
         return self.create_response(
             'plain_text',
             response,
@@ -474,3 +487,229 @@ Handle conversations naturally while steering toward professional development. I
             params['skills'] = ','.join(mentioned_skills)
         
         return params if len(params) > 1 else None  # Only return if we have actual search criteria 
+
+    def _is_technology_question(self, query: str) -> bool:
+        """Check if the query is a technology-related question"""
+        technology_keywords = [
+            'flutter', 'react', 'angular', 'vue', 'javascript', 'typescript', 'python', 'java', 'kotlin', 'swift',
+            'machine learning', 'ai', 'artificial intelligence', 'data science', 'android', 'ios', 'mobile development',
+            'web development', 'frontend', 'backend', 'full stack', 'devops', 'cloud', 'aws', 'azure', 'docker',
+            'kubernetes', 'node.js', 'django', 'flask', 'spring', 'laravel', 'php', 'c#', 'c++', 'go', 'rust',
+            'blockchain', 'cybersecurity', 'database', 'sql', 'mongodb', 'redis', 'git', 'agile', 'scrum'
+        ]
+        query_lower = query.lower()
+        return any(keyword in query_lower for keyword in technology_keywords)
+
+    async def _handle_technology_question(self, query: str, language: str) -> Dict[str, Any]:
+        """Handle technology-related questions with helpful responses"""
+        query_lower = query.lower()
+        
+        # Flutter-specific responses
+        if 'flutter' in query_lower:
+            if language == 'hindi':
+                response = """Flutter ke baare mein bata deta hoon! 🚀
+
+Flutter ek cross-platform mobile development framework hai jo Google ne banaya hai. Isme aap ek hi code se Android aur iOS dono platforms ke liye apps bana sakte hain.
+
+**Flutter ke main features:**
+• Dart programming language use karta hai
+• Hot reload feature hai - instant changes dikhte hain
+• Beautiful UI components built-in hain
+• Performance native apps jaisi hai
+• Large community aur documentation available hai
+
+**Career mein Flutter:**
+• Mobile app development mein high demand hai
+• Freelancing opportunities bahut hain
+• Salary packages competitive hain
+• Learning curve manageable hai
+
+Kya aap Flutter development mein career banana chahte hain? Main aapko step-by-step guide kar sakta hoon! 💼"""
+            elif language == 'hinglish':
+                response = """Flutter ke baare mein bata deta hoon yaar! 🚀
+
+Flutter ek cross-platform mobile development framework hai jo Google ne banaya hai. Isme aap ek hi code se Android aur iOS dono ke liye apps bana sakte ho.
+
+**Flutter ke main features:**
+• Dart programming language use karta hai
+• Hot reload feature hai - instant changes dikhte hain
+• Beautiful UI components built-in hain
+• Performance native apps jaisi hai
+• Large community aur documentation available hai
+
+**Career mein Flutter:**
+• Mobile app development mein high demand hai
+• Freelancing opportunities bahut hain
+• Salary packages competitive hain
+• Learning curve manageable hai
+
+Kya tum Flutter development mein career banana chahte ho? Main step-by-step guide kar sakta hoon! 💼"""
+            else:
+                response = """Let me tell you about Flutter! 🚀
+
+Flutter is a cross-platform mobile development framework created by Google. You can build apps for both Android and iOS platforms using a single codebase.
+
+**Key Features of Flutter:**
+• Uses Dart programming language
+• Hot reload feature for instant changes
+• Beautiful built-in UI components
+• Native-like performance
+• Large community and excellent documentation
+
+**Flutter in Career:**
+• High demand in mobile app development
+• Great freelancing opportunities
+• Competitive salary packages
+• Manageable learning curve
+
+Would you like to build a career in Flutter development? I can guide you step by step! 💼"""
+        
+        # React-specific responses
+        elif 'react' in query_lower:
+            if language == 'hindi':
+                response = """React ke baare mein bata deta hoon! ⚛️
+
+React ek popular JavaScript library hai jo Facebook ne banaya hai. Web applications banane ke liye use hota hai.
+
+**React ke main features:**
+• Component-based architecture
+• Virtual DOM for better performance
+• Large ecosystem aur community
+• Reusable components
+• Easy to learn aur use
+
+**Career mein React:**
+• Frontend development mein high demand
+• Good salary packages
+• Remote work opportunities
+• Continuous learning scope
+
+Kya aap React development mein interested hain? 💼"""
+            else:
+                response = """Let me tell you about React! ⚛️
+
+React is a popular JavaScript library created by Facebook for building user interfaces and web applications.
+
+**Key Features of React:**
+• Component-based architecture
+• Virtual DOM for better performance
+• Large ecosystem and community
+• Reusable components
+• Easy to learn and use
+
+**React in Career:**
+• High demand in frontend development
+• Good salary packages
+• Remote work opportunities
+• Continuous learning scope
+
+Are you interested in React development? 💼"""
+        
+        # Python-specific responses
+        elif 'python' in query_lower:
+            if language == 'hindi':
+                response = """Python ke baare mein bata deta hoon! 🐍
+
+Python ek versatile programming language hai jo beginners ke liye perfect hai aur advanced developers ke liye bhi powerful hai.
+
+**Python ke main uses:**
+• Web development (Django, Flask)
+• Data Science aur Machine Learning
+• Automation aur scripting
+• AI aur Artificial Intelligence
+• Backend development
+
+**Career mein Python:**
+• High demand in multiple fields
+• Excellent salary packages
+• Remote work opportunities
+• Great for freelancing
+
+Kya aap Python development mein career banana chahte hain? 💼"""
+            else:
+                response = """Let me tell you about Python! 🐍
+
+Python is a versatile programming language that's perfect for beginners and powerful for advanced developers.
+
+**Main Uses of Python:**
+• Web development (Django, Flask)
+• Data Science and Machine Learning
+• Automation and scripting
+• AI and Artificial Intelligence
+• Backend development
+
+**Python in Career:**
+• High demand in multiple fields
+• Excellent salary packages
+• Remote work opportunities
+• Great for freelancing
+
+Would you like to build a career in Python development? 💼"""
+        
+        # General technology response
+        else:
+            if language == 'hindi':
+                response = f"""Technology ke baare mein baat karte hain! 💻
+
+{query} ek interesting technology hai. Technology field mein career opportunities bahut hain:
+
+**Technology Career Options:**
+• Software Development
+• Web Development
+• Mobile App Development
+• Data Science
+• DevOps
+• UI/UX Design
+• Product Management
+
+**Benefits:**
+• High salary packages
+• Remote work opportunities
+• Continuous learning
+• Global opportunities
+
+Kya aap technology field mein career banana chahte hain? Main aapko guide kar sakta hoon! 🚀"""
+            elif language == 'hinglish':
+                response = f"""Technology ke baare mein baat karte hain yaar! 💻
+
+{query} ek interesting technology hai. Technology field mein career opportunities bahut hain:
+
+**Technology Career Options:**
+• Software Development
+• Web Development
+• Mobile App Development
+• Data Science
+• DevOps
+• UI/UX Design
+• Product Management
+
+**Benefits:**
+• High salary packages
+• Remote work opportunities
+• Continuous learning
+• Global opportunities
+
+Kya tum technology field mein career banana chahte ho? Main guide kar sakta hoon! 🚀"""
+            else:
+                response = f"""Let's talk about technology! 💻
+
+{query} is an interesting technology. There are many career opportunities in the technology field:
+
+**Technology Career Options:**
+• Software Development
+• Web Development
+• Mobile App Development
+• Data Science
+• DevOps
+• UI/UX Design
+• Product Management
+
+**Benefits:**
+• High salary packages
+• Remote work opportunities
+• Continuous learning
+• Global opportunities
+
+Would you like to build a career in technology? I can guide you! 🚀"""
+        
+        return self.create_response('plain_text', response, {'chat_type': 'technology_question', 'language': language}) 

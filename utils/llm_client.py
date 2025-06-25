@@ -19,14 +19,21 @@ class LLMClient:
         genai.configure(api_key=api_key)
         self.model = genai.GenerativeModel('gemini-1.5-pro')
     
-    async def generate_response(self, prompt: str, system_message: str = "") -> str:
+    async def generate_response(self, prompt: str, system_message: str = "", max_tokens:Optional[int] = 1024) -> str:
         """Generate a response using the language model"""
         try:
             # Combine system message and prompt
+            generation_config = genai.GenerationConfig(
+                temperature=0.8,
+                max_output_tokens=max_tokens
+            )
             full_prompt = f"{system_message}\n\nUser: {prompt}\n\nAssistant:"
             
             # Generate response
-            response = self.model.generate_content(full_prompt)
+            response = self.model.generate_content(
+                full_prompt,
+                generation_config=generation_config
+            )
             
             if response.text:
                 return response.text.strip()
@@ -56,8 +63,6 @@ class LLMClient:
             return 'hinglish'
         else:
             return 'english'
-    
-
     
     def _get_fallback_response(self) -> str:
         """Get a fallback response when LLM fails"""
