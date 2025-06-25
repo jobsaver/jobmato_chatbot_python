@@ -10,6 +10,8 @@ logger = logging.getLogger(__name__)
 class GeneralChatAgent(BaseAgent):
     """Agent responsible for handling general chat conversations"""
     
+    UNREALISTIC_LOCATIONS = {"mars", "moon", "jupiter", "saturn", "venus", "pluto", "mercury", "neptune", "uranus", "andromeda", "milky way", "galaxy", "space", "sun"}
+    
     def __init__(self, memory_manager=None):
         super().__init__()
         self.llm_client = LLMClient()
@@ -712,4 +714,18 @@ Kya tum technology field mein career banana chahte ho? Main guide kar sakta hoon
 
 Would you like to build a career in technology? I can guide you! 🚀"""
         
+        if self._is_unrealistic_location(query):
+            response = {
+                'hindi': "Sorry, Mars ya Moon par abhi jobs available nahi hain! 🚀 Lekin main aapko Earth par technology careers mein help kar sakta hoon. Kya interest hai aapka?",
+                'hinglish': "Sorry yaar, Mars ya Moon par jobs nahi milengi! 🚀 Lekin technology careers mein help kar sakta hoon. Kya interest hai tumhara?",
+                'english': "Sorry, I can't find jobs on Mars yet! 🚀 But I can help you with real-world technology careers. What tech or location are you interested in?"
+            }.get(language, "Sorry, I can't find jobs on Mars yet! 🚀 But I can help you with real-world technology careers. What tech or location are you interested in?")
+            return self.create_response('plain_text', response, {'chat_type': 'unrealistic_location', 'language': language})
+        
         return self.create_response('plain_text', response, {'chat_type': 'technology_question', 'language': language}) 
+
+    def _is_unrealistic_location(self, query: str) -> bool:
+        if not query:
+            return False
+        query_lower = query.strip().lower()
+        return any(loc in query_lower for loc in self.UNREALISTIC_LOCATIONS) 
