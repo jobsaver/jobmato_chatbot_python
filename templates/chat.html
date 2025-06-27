@@ -670,6 +670,10 @@
                 this.connected = false;
                 this.authenticated = false;
                 this.jwtToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjY4NDcxMDBlYTQxN2IwMGEyMGYzZjA1MSIsImVtYWlsIjoiaGFja3lhYmhheUBnbWFpbC5jb20iLCJpYXQiOjE3NTEwMjgyNzMsImV4cCI6MTc1MTYzMzA3M30.E_x9zxiRGuAXR0thdE6qiEdl87VuzHOtucEz6jERDFA';
+                this.currentSearchQuery = '';
+                this.hasMoreJobs = false;
+                this.currentPage = 1;
+                this.totalJobs = 0;
                 this.initializeWebSocket();
                 this.initializeEventListeners();
                 this.autoResizeTextarea();
@@ -786,14 +790,22 @@
                     if (data.type === 'job_card' && data.metadata) {
                         this.currentSearchQuery = data.metadata.searchQuery || '';
                         this.hasMoreJobs = data.metadata.hasMore || false;
+                        this.totalJobs = data.metadata.total || data.metadata.totalJobs || 0;
+                        
                         if (data.metadata.isFollowUp) {
-                            this.currentPage = data.metadata.currentPage || 1;
-                            // Re-enable load more button for follow-up responses
-                            this.updateLoadMoreButton();
+                            // This is a load more response
+                            this.currentPage = data.metadata.currentPage || data.metadata.page || 1;
+                            console.log(`Load more response: page=${this.currentPage}, hasMore=${this.hasMoreJobs}, total=${this.totalJobs}`);
                         } else {
-                            this.currentPage = 1; // Reset for new search
+                            // This is a new search
+                            this.currentPage = 1;
+                            console.log(`New search: page=${this.currentPage}, hasMore=${this.hasMoreJobs}, total=${this.totalJobs}`);
                         }
-                        console.log(`Job search state: hasMore=${this.hasMoreJobs}, page=${this.currentPage}, query="${this.currentSearchQuery}"`);
+                        
+                        // Update load more button state
+                        this.updateLoadMoreButton();
+                        
+                        console.log(`Job search state: hasMore=${this.hasMoreJobs}, page=${this.currentPage}, total=${this.totalJobs}, query="${this.currentSearchQuery}"`);
                     }
                     
                     // Check if response suggests uploading resume
@@ -1287,7 +1299,9 @@
                 if (loadMoreBtn) {
                     if (this.hasMoreJobs) {
                         loadMoreBtn.disabled = false;
-                        loadMoreBtn.textContent = 'Load More Jobs';
+                        const nextPageStart = this.currentPage * 10 + 1;
+                        const nextPageEnd = Math.min((this.currentPage + 1) * 10, this.totalJobs);
+                        loadMoreBtn.textContent = `Load More Jobs (${nextPageStart}-${nextPageEnd} of ${this.totalJobs})`;
                     } else {
                         loadMoreBtn.disabled = true;
                         loadMoreBtn.textContent = 'No More Jobs';
@@ -1323,7 +1337,7 @@
                         loadMoreBtn.textContent = 'Load More Jobs';
                         console.log('Load more request timed out, re-enabling button');
                     }
-                }, 10000); // 10 second timeout
+                }, 15000); // 15 second timeout
             }
             
             // Session Management Methods

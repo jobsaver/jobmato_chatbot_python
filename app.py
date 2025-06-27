@@ -294,6 +294,19 @@ class JobMatoChatBot:
             if not extracted_data:  # Only use entities if no other data found
                 extracted_data = {}
                 
+                # Map job_role_or_skill to job_title and skills
+                if entities.get('job_role_or_skill'):
+                    job_role = entities['job_role_or_skill']
+                    logger.info(f"🎯 Found job_role_or_skill: {job_role}")
+                    if isinstance(job_role, list) and job_role:
+                        extracted_data['job_title'] = job_role[0]
+                        extracted_data['skills'] = job_role
+                        logger.info(f"🎯 Mapped job_role_or_skill list: job_title={job_role[0]}, skills={job_role}")
+                    else:
+                        extracted_data['job_title'] = job_role
+                        extracted_data['skills'] = [job_role] if isinstance(job_role, str) else job_role
+                        logger.info(f"🎯 Mapped job_role_or_skill string: job_title={job_role}, skills={extracted_data['skills']}")
+                
                 # Map job_title_keywords to job_title
                 if entities.get('job_title_keywords'):
                     if isinstance(entities['job_title_keywords'], list) and entities['job_title_keywords']:
@@ -920,7 +933,7 @@ def handle_load_more_jobs(data):
             raise Exception("User not authenticated or session not initialized")
         
         # Get pagination parameters
-        current_page = data.get('page', 1)
+        current_page = data.get('page', 2)  # Default to page 2 for load more
         search_query = data.get('searchQuery', '')
         
         logger.info(f"📄 Loading more jobs for user {user_id}, page {current_page}, query: {search_query}")
@@ -964,6 +977,7 @@ def handle_load_more_jobs(data):
         response = asyncio.run(chatbot.job_search_agent.search_jobs_follow_up(routing_data, current_page))
         
         if response:
+            # Handle the response through the agent response handler
             handle_agent_response(request, response)
         else:
             emit(current_config.SOCKET_EVENTS['receive_message'], {

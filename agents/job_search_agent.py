@@ -198,7 +198,7 @@ class JobSearchAgent(BaseAgent):
 
             # Get total available jobs from API response
             total_available = jobs_data.get('total', total_jobs)
-            has_more = total_available > 5  # Show load more if more than 5 jobs available
+            has_more = total_available > 10  # Show load more if more than 10 jobs available
 
             # Store search context for follow-up searches
             search_context = {
@@ -209,7 +209,10 @@ class JobSearchAgent(BaseAgent):
                 'experience_min': extracted_data.get('experience_min'),
                 'experience_max': extracted_data.get('experience_max'),
                 'job_title': extracted_data.get('job_title'),
-                'original_query': original_query
+                'original_query': original_query,
+                'search_params': search_params,  # Store full search params for load more
+                'total_available': total_available,
+                'current_page': 1
             }
             
             # Store in memory manager for session persistence
@@ -428,7 +431,7 @@ class JobSearchAgent(BaseAgent):
     async def _build_search_params(self, extracted_data: Dict[str, Any], profile_data: Dict[str, Any], resume_data: Dict[str, Any]) -> Dict[str, Any]:
         """Build comprehensive search parameters from extracted data using JobMato Tools"""
         params = {
-            'limit': 5,  # Show only 5 jobs by default
+            'limit': 10,  # Show 10 jobs per page
             'page': 1
         }
         
@@ -936,58 +939,61 @@ class JobSearchAgent(BaseAgent):
             extracted_data = routing_data.get('extractedData', {})
             original_query = routing_data.get('originalQuery', '')
             
+            # Get stored search params from context
+            stored_search_params = extracted_data.get('search_params', {})
+            
             # Build search parameters for follow-up
             search_params = {
-                'limit': 5,
+                'limit': 10,  # Show 10 jobs per page
                 'page': page
             }
             
-            # Add skills if available
-            if extracted_data.get('skills'):
-                search_params['skills'] = extracted_data['skills']
+            # Use stored search params if available, otherwise fall back to extracted data
+            if stored_search_params:
+                # Copy all search params except page and limit
+                for key, value in stored_search_params.items():
+                    if key not in ['page', 'limit']:
+                        search_params[key] = value
+                logger.info(f"🔄 Using stored search params for page {page}: {search_params}")
+            else:
+                # Fallback to extracted data
+                if extracted_data.get('skills'):
+                    search_params['skills'] = extracted_data['skills']
+                
+                if extracted_data.get('location'):
+                    search_params['location'] = extracted_data['location']
+                
+                if extracted_data.get('experience_min') is not None:
+                    search_params['experience_min'] = extracted_data['experience_min']
+                if extracted_data.get('experience_max') is not None:
+                    search_params['experience_max'] = extracted_data['experience_max']
+                
+                if extracted_data.get('internship'):
+                    search_params['internship'] = True
+                    search_params['job_type'] = 'internship'
+                
+                if extracted_data.get('job_title'):
+                    search_params['job_title'] = extracted_data['job_title']
+                
+                logger.info(f"🔄 Using extracted data for page {page}: {search_params}")
             
-            # Add location if available
-            if extracted_data.get('location'):
-                search_params['location'] = extracted_data['location']
-            
-            # Add experience filters if available
-            if extracted_data.get('experience_min') is not None:
-                search_params['experience_min'] = extracted_data['experience_min']
-            if extracted_data.get('experience_max') is not None:
-                search_params['experience_max'] = extracted_data['experience_max']
-            
-            # Add internship filter if available
-            if extracted_data.get('internship'):
-                search_params['internship'] = True
-                search_params['job_type'] = 'internship'
-            
-            # Add job title if available
-            if extracted_data.get('job_title'):
-                search_params['job_title'] = extracted_data['job_title']
-            
-            logger.info(f"🔄 Follow-up search params: {search_params}")
-            
-            # Perform the search
-            jobs_response = await self.search_jobs_tool(
-                skills=search_params.get('skills'),
-                location=search_params.get('location'),
-                job_title=search_params.get('job_title'),
-                experience_min=search_params.get('experience_min'),
-                experience_max=search_params.get('experience_max'),
-                internship=search_params.get('internship'),
-                limit=search_params['limit'],
-                page=search_params['page']
+            # Perform the search using the job search tool
+            job_search_result = await self.search_jobs_tool(
+                token=routing_data.get('token', ''),
+                base_url=routing_data.get('baseUrl', self.base_url),
+                **search_params
             )
             
-            if not jobs_response or not jobs_response.get('success'):
+            if not job_search_result or not job_search_result.get('success'):
                 return {
                     'type': 'plain_text',
                     'content': 'No more jobs found. Try adjusting your search criteria.',
                     'metadata': {'error': 'No more jobs'}
                 }
             
-            jobs = jobs_response.get('jobs', [])
-            total_jobs = jobs_response.get('total', 0)
+            jobs_data = job_search_result.get('data', {})
+            jobs = job_search_result.get('jobs', []) or jobs_data.get('jobs', [])
+            total_jobs = jobs_data.get('total', len(jobs))
             
             if not jobs:
                 return {
@@ -1024,17 +1030,7 @@ class JobSearchAgent(BaseAgent):
             # Format jobs for display
             formatted_jobs = []
             for job in jobs:
-                formatted_job = {
-                    'title': self._safe_extract(job, 'title'),
-                    'company': self._safe_extract(job, 'company'),
-                    'location': self._safe_extract(job, 'location'),
-                    'job_type': self._safe_extract(job, 'job_type'),
-                    'experience': self._safe_extract(job, 'experience'),
-                    'skills': self._safe_extract(job, 'skills'),
-                    'salary': self._safe_extract(job, 'salary'),
-                    'apply_url': self._safe_extract(job, 'apply_url'),
-                    'source': self._safe_extract(job, 'source')
-                }
+                formatted_job = self.format_job_for_response(job)
                 formatted_jobs.append(formatted_job)
             
             # Calculate pagination info
@@ -1051,48 +1047,43 @@ class JobSearchAgent(BaseAgent):
             # Store in memory
             if self.memory_manager:
                 try:
-                    await self.memory_manager.add_message(
+                    await self.memory_manager.store_conversation(
                         session_id=routing_data.get('sessionId', 'default'),
-                        message=f"Load more jobs request - Page {page}",
-                        sender='user',
-                        metadata={'page': page, 'total_pages': total_pages}
-                    )
-                    
-                    await self.memory_manager.add_message(
-                        session_id=routing_data.get('sessionId', 'default'),
-                        message=message,
-                        sender='assistant',
+                        user_message=f"Load more jobs request - Page {page}",
+                        assistant_message=message,
                         metadata={
                             'type': 'job_card',
                             'jobs_count': len(formatted_jobs),
                             'page': page,
                             'total_pages': total_pages,
-                            'has_more': has_more
+                            'has_more': has_more,
+                            'search_context': extracted_data
                         }
                     )
                 except Exception as e:
                     logger.warning(f"⚠️ Could not store follow-up search in memory: {str(e)}")
             
-            return {
-                'type': 'job_card',
-                'content': message,
-                'metadata': {
-                    'jobs': formatted_jobs,
-                    'totalJobs': total_jobs,
-                    'currentPage': page,
-                    'totalPages': total_pages,
+            return self.response_formatter.format_job_response(
+                jobs=formatted_jobs,
+                metadata={
+                    'total': total_jobs,
                     'hasMore': has_more,
-                    'searchContext': extracted_data
+                    'page': page,
+                    'totalPages': total_pages,
+                    'searchQuery': original_query,
+                    'searchParams': search_params,
+                    'searchContext': extracted_data,
+                    'isFollowUp': True,
+                    'currentPage': page
                 }
-            }
+            )
             
         except Exception as e:
             logger.error(f"❌ Error in follow-up job search: {str(e)}")
-            return {
-                'type': 'plain_text',
-                'content': 'Sorry, there was an error loading more jobs. Please try again.',
-                'metadata': {'error': str(e)}
-            }
+            return self.response_formatter.format_error_response(
+                error_message='Sorry, there was an error loading more jobs. Please try again.',
+                error_details=str(e)
+            )
     
     async def _build_broader_search_params(self, extracted_data: Dict[str, Any], original_params: Dict[str, Any]) -> Dict[str, Any]:
         """Build broader search parameters when initial search returns no results"""
@@ -1111,7 +1102,7 @@ class JobSearchAgent(BaseAgent):
         
         # Keep only essential parameters
         essential_params = {
-            'limit': 5,
+            'limit': 10,  # Show 10 jobs per page
             'page': 1
         }
         
@@ -1197,7 +1188,7 @@ class JobSearchAgent(BaseAgent):
             essential_params['query'] = extracted_data['query']
         
         logger.info(f"🔄 Built broader search params: {essential_params}")
-        return essential_params 
+        return essential_params
 
     def _is_unrealistic_location(self, location: str) -> bool:
         if not location:

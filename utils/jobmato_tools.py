@@ -286,14 +286,66 @@ class JobMatoTools:
         Get user profile information
         """
         logger.info("👤 Fetching user profile")
-        return self._make_request('GET', '/api/rag/profile', token)
+        result = self._make_request('GET', '/api/rag/profile', token)
+        
+        # Add detailed logging for profile data
+        logger.info(f"👤 Profile API response success: {result.get('success', False)}")
+        logger.info(f"👤 Profile API response time: {result.get('response_time', 0):.2f}s")
+        
+        if result.get('success'):
+            data = result.get('data', {})
+            logger.info(f"👤 Profile API data type: {type(data)}")
+            logger.info(f"👤 Profile API data keys: {list(data.keys()) if isinstance(data, dict) else 'Not a dict'}")
+            
+            if isinstance(data, dict):
+                # Log the structure of the profile data
+                for key, value in data.items():
+                    if isinstance(value, (list, dict)):
+                        logger.info(f"👤 Profile data.{key}: {type(value)} with {len(value)} items")
+                    else:
+                        logger.info(f"👤 Profile data.{key}: {type(value)} = {str(value)[:100]}...")
+        else:
+            logger.error(f"❌ Profile API failed: {result.get('error', 'Unknown error')}")
+        
+        return result
     
     def get_user_resume(self, token: str) -> Dict[str, Any]:
         """
         Get user's latest resume information
         """
         logger.info("📄 Fetching user resume")
-        return self._make_request('GET', '/api/rag/resume', token)
+        result = self._make_request('GET', '/api/rag/resume', token)
+        
+        # Add detailed logging for resume data
+        logger.info(f"📄 Resume API response success: {result.get('success', False)}")
+        logger.info(f"📄 Resume API response time: {result.get('response_time', 0):.2f}s")
+        
+        if result.get('success'):
+            data = result.get('data', {})
+            logger.info(f"📄 Resume API data type: {type(data)}")
+            logger.info(f"📄 Resume API data keys: {list(data.keys()) if isinstance(data, dict) else 'Not a dict'}")
+            
+            if isinstance(data, dict):
+                # Log the structure of the resume data
+                for key, value in data.items():
+                    if isinstance(value, (list, dict)):
+                        logger.info(f"📄 Resume data.{key}: {type(value)} with {len(value)} items")
+                    else:
+                        logger.info(f"📄 Resume data.{key}: {type(value)} = {str(value)[:100]}...")
+            
+            # Check if we have actual resume content
+            has_content = False
+            if isinstance(data, dict):
+                if data.get('data'):
+                    has_content = True
+                elif any(key in data for key in ['skills', 'experience', 'education', 'summary', 'content']):
+                    has_content = True
+            
+            logger.info(f"📄 Resume has content: {has_content}")
+        else:
+            logger.error(f"❌ Resume API failed: {result.get('error', 'Unknown error')}")
+        
+        return result
     
     def upload_resume(self, token: str, file_path: str) -> Dict[str, Any]:
         """

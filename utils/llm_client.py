@@ -23,6 +23,29 @@ class LLMClient:
         # Use the fastest model for better performance
         self.model = genai.GenerativeModel('gemini-2.5-flash') 
         
+        # Disable safety filters
+        self.model = genai.GenerativeModel(
+            'gemini-2.5-flash',
+            safety_settings=[
+                {
+                    "category": "HARM_CATEGORY_HARASSMENT",
+                    "threshold": "BLOCK_NONE"
+                },
+                {
+                    "category": "HARM_CATEGORY_HATE_SPEECH", 
+                    "threshold": "BLOCK_NONE"
+                },
+                {
+                    "category": "HARM_CATEGORY_SEXUALLY_EXPLICIT",
+                    "threshold": "BLOCK_NONE"
+                },
+                {
+                    "category": "HARM_CATEGORY_DANGEROUS_CONTENT",
+                    "threshold": "BLOCK_NONE"
+                }
+            ]
+        )
+        
         # Simple in-memory cache for repeated queries
         self.cache = {}
         self.cache_size = 100  # Keep last 100 responses
@@ -67,11 +90,17 @@ class LLMClient:
                 return result
             else:
                 logger.error("Empty response from language model")
-                return "I apologize, but I couldn't generate a proper response. Please try again."
+                return {"error": "Empty response from language model"}
                 
         except Exception as e:
             logger.error(f"Error generating LLM response: {str(e)}")
-            return self._get_fallback_response()
+            
+            # Check if it's a safety filter error
+            if "finish_reason" in str(e) and "2" in str(e):
+                logger.warning("⚠️ Safety filter triggered - content blocked")
+                return {"error": "safety_filter", "message": "Content blocked by safety filters"}
+            
+            return {"error": str(e)}
     
     def _create_cache_key(self, prompt: str, system_message: str) -> str:
         """Create a cache key for the prompt"""
