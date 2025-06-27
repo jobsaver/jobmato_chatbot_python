@@ -264,14 +264,82 @@ class JobMatoChatBot:
                 'error': f'Classification parsing failed. Original LLM response was: "{raw_response}". Error: {parse_error or "Unknown parsing error."}'
             }
         
-        # Ensure extractedData is always an object
-        classification['extractedData'] = classification.get('extractedData') or {}
+        # Map query classifier response format to expected extractedData format
+        # Query classifier might return different field names, so check all possibilities
+        extracted_data = (
+            classification.get('extractedData') or 
+            classification.get('parameters') or 
+            classification.get('query_parameters') or 
+            classification.get('data') or 
+            {}
+        )
+        
+        # Handle 'keywords' from query classifier
+        keywords = classification.get('keywords')
+        if keywords and not extracted_data:
+            logger.info(f"📋 Found keywords: {keywords}")
+            extracted_data = {
+                'query': keywords,
+                'job_title': keywords,
+                'skills': [keywords] if isinstance(keywords, str) else keywords
+            }
+            logger.info(f"🔄 Mapped keywords to extractedData: {extracted_data}")
+        
+        # Handle 'entities' structure from query classifier
+        entities = classification.get('entities')
+        if entities and isinstance(entities, dict):
+            logger.info(f"📋 Found entities structure: {entities}")
+            
+            # Map entities to extractedData format
+            if not extracted_data:  # Only use entities if no other data found
+                extracted_data = {}
+                
+                # Map job_title_keywords to job_title
+                if entities.get('job_title_keywords'):
+                    if isinstance(entities['job_title_keywords'], list) and entities['job_title_keywords']:
+                        extracted_data['job_title'] = entities['job_title_keywords'][0]
+                    else:
+                        extracted_data['job_title'] = entities['job_title_keywords']
+                
+                # Map skills
+                if entities.get('skills'):
+                    extracted_data['skills'] = entities['skills']
+                
+                # Map location
+                if entities.get('location') and entities['location']:
+                    if isinstance(entities['location'], list):
+                        extracted_data['location'] = entities['location'][0] if entities['location'] else None
+                    else:
+                        extracted_data['location'] = entities['location']
+                
+                # Map experience_level
+                if entities.get('experience_level') and entities['experience_level']:
+                    if isinstance(entities['experience_level'], list):
+                        extracted_data['experience_level'] = entities['experience_level'][0] if entities['experience_level'] else None
+                    else:
+                        extracted_data['experience_level'] = entities['experience_level']
+                
+                # Map job_type
+                if entities.get('job_type') and entities['job_type']:
+                    if isinstance(entities['job_type'], list):
+                        extracted_data['job_type'] = entities['job_type'][0] if entities['job_type'] else None
+                    else:
+                        extracted_data['job_type'] = entities['job_type']
+                
+                logger.info(f"🔄 Mapped entities to extractedData: {extracted_data}")
+        
+        # Ensure it's always an object
+        if not isinstance(extracted_data, dict):
+            extracted_data = {}
+        
+        logger.info(f"✅ Final mapped extractedData: {extracted_data}")
+        logger.info(f"📋 Original classification keys: {list(classification.keys())}")
         
         # Build routing data
         routing_data = {
             'category': classification['category'],
             'confidence': classification.get('confidence', 0.8),
-            'extractedData': classification['extractedData'],
+            'extractedData': extracted_data,
             'searchQuery': classification.get('searchQuery') or original_data.get('chatInput', ''),
             'originalQuery': original_data.get('chatInput', ''),
             'body': original_data,

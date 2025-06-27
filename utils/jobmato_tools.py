@@ -5,6 +5,9 @@ import json
 from urllib.parse import urlencode
 import os
 import io
+import time
+import jwt
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -13,37 +16,75 @@ class JobMatoTools:
     
     def __init__(self, base_url: str = "https://backend-v1.jobmato.com"):
         self.base_url = base_url
-        self.timeout = 30
+        self.timeout = 45  # Increased timeout
+        self.max_retries = 2  # Add retry mechanism
+    
+    def _extract_user_info(self, token: str) -> Dict[str, Any]:
+        """Extract user information from JWT token for logging"""
+        try:
+            if not token:
+                return {'user_id': 'anonymous', 'email': 'unknown'}
+            
+            # Decode without verification for logging purposes
+            payload = jwt.decode(token, options={"verify_signature": False})
+            return {
+                'user_id': payload.get('id', 'unknown'),
+                'email': payload.get('email', 'unknown'),
+                'exp': payload.get('exp', 'unknown')
+            }
+        except Exception as e:
+            logger.warning(f"⚠️ Could not decode token for logging: {str(e)}")
+            return {'user_id': 'decode_error', 'email': 'unknown'}
     
     def _make_request(self, method: str, endpoint: str, token: str, 
                      params: Optional[Dict[str, Any]] = None, 
                      data: Optional[Dict[str, Any]] = None,
-                     files: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        """Make HTTP request to JobMato API"""
+                     files: Optional[Dict[str, Any]] = None,
+                     retry_count: int = 0) -> Dict[str, Any]:
+        """Make HTTP request to JobMato API with detailed logging and retry mechanism"""
+        
+        # Extract user info for logging
+        user_info = self._extract_user_info(token)
+        request_id = f"{int(time.time() * 1000)}"  # Simple request ID
+        
         try:
             url = f"{self.base_url}{endpoint}"
             headers = {
                 'Authorization': f'Bearer {token}',
-                'Accept': 'application/json'
+                'Accept': 'application/json',
+                'X-Request-ID': request_id  # Add request tracking
             }
             
             # Don't add Content-Type for file uploads
             if not files:
                 headers['Content-Type'] = 'application/json'
             
-            logger.info(f"🌐 Making {method} request to: {url}")
-            logger.info(f"🔑 Using token: {token[:50]}..." if token else "❌ No token")
-            if params:
-                logger.info(f"📋 Parameters: {params}")
+            # Enhanced logging
+            logger.info(f"🌐 API Request [{request_id}] - {method} {url}")
+            logger.info(f"👤 User: {user_info['user_id']} ({user_info['email']})")
+            logger.info(f"🔑 Token: {token[:20]}...{token[-10:] if len(token) > 30 else token}")
+            logger.info(f"🔄 Retry: {retry_count}/{self.max_retries}")
             
+            if params:
+                logger.info(f"📋 Parameters: {json.dumps(params, indent=2)}")
+            if data and not files:
+                logger.info(f"📄 Data: {json.dumps(data, indent=2) if isinstance(data, dict) else str(data)}")
+            
+            # Start timing
+            start_time = time.time()
+            
+            # Make the request
+            response = None
             if method.upper() == 'GET':
+                logger.info(f"📤 Making GET request with timeout: {self.timeout}s")
                 response = requests.get(url, headers=headers, params=params, timeout=self.timeout)
+                
             elif method.upper() == 'POST':
                 if files:
                     # Remove Content-Type for file uploads (let requests set it)
                     headers.pop('Content-Type', None)
                     logger.info(f"📁 Files being sent: {list(files.keys()) if files else 'None'}")
-                    logger.info(f"📄 Data being sent: {data if data else 'None'}")
+                    logger.info(f"📄 Form data: {data if data else 'None'}")
                     
                     # Debug the actual file content being sent
                     for key, file_info in files.items():
@@ -59,33 +100,99 @@ class JobMatoTools:
                                 file_obj.seek(pos)  # Restore position
                                 logger.info(f"📁 File '{key}': {filename}, size: {len(content)} bytes")
                     
+                    logger.info(f"📤 Making POST request (file upload) with timeout: {self.timeout}s")
                     response = requests.post(url, headers=headers, files=files, data=data, timeout=self.timeout)
                 else:
+                    logger.info(f"📤 Making POST request (JSON) with timeout: {self.timeout}s")
                     response = requests.post(url, headers=headers, json=data, timeout=self.timeout)
             else:
                 raise ValueError(f"Unsupported HTTP method: {method}")
             
-            logger.info(f"📡 Response status: {response.status_code}")
-            logger.info(f"📡 Response headers: {dict(response.headers)}")
+            # Calculate response time
+            response_time = time.time() - start_time
+            
+            # Enhanced response logging
+            logger.info(f"📡 Response [{request_id}] - Status: {response.status_code}")
+            logger.info(f"⏱️ Response Time: {response_time:.2f}s")
+            logger.info(f"📊 Response Size: {len(response.content)} bytes")
+            logger.info(f"🔗 Response Headers: {dict(response.headers)}")
             
             if response.status_code in [200, 201]:
                 try:
                     result = response.json()
-                    logger.info(f"✅ Request successful")
-                    return {'success': True, 'data': result}
-                except json.JSONDecodeError:
-                    return {'success': True, 'data': {'message': 'Request successful'}}
+                    logger.info(f"✅ Request successful [{request_id}] - {response_time:.2f}s")
+                    
+                    # Log response structure (limited)
+                    if isinstance(result, dict):
+                        keys = list(result.keys())[:5]  # First 5 keys only
+                        logger.info(f"📋 Response Keys: {keys}")
+                        if 'data' in result and isinstance(result['data'], (list, dict)):
+                            if isinstance(result['data'], list):
+                                logger.info(f"📊 Response Data: Array with {len(result['data'])} items")
+                            else:
+                                data_keys = list(result['data'].keys())[:5]
+                                logger.info(f"📊 Response Data Keys: {data_keys}")
+                    
+                    return {'success': True, 'data': result, 'response_time': response_time}
+                except json.JSONDecodeError as je:
+                    logger.warning(f"⚠️ JSON decode error [{request_id}]: {str(je)}")
+                    logger.info(f"📄 Raw response: {response.text[:500]}...")
+                    return {'success': True, 'data': {'message': 'Request successful'}, 'response_time': response_time}
             else:
-                logger.error(f"❌ Request failed: {response.status_code} - {response.text}")
+                logger.error(f"❌ Request failed [{request_id}] - {response.status_code} in {response_time:.2f}s")
+                logger.error(f"📄 Error response: {response.text[:1000]}...")
                 return {
                     'success': False, 
-                    'error': f"Request failed: {response.status_code}",
-                    'details': response.text
+                    'error': f"HTTP {response.status_code}: {response.reason}",
+                    'details': response.text,
+                    'response_time': response_time
                 }
                 
+        except requests.exceptions.Timeout as te:
+            response_time = time.time() - start_time if 'start_time' in locals() else self.timeout
+            logger.error(f"⏰ Request timeout [{request_id}] after {response_time:.2f}s - {str(te)}")
+            
+            # Retry logic for timeouts
+            if retry_count < self.max_retries:
+                logger.info(f"🔄 Retrying request [{request_id}] ({retry_count + 1}/{self.max_retries})")
+                time.sleep(1)  # Brief delay before retry
+                return self._make_request(method, endpoint, token, params, data, files, retry_count + 1)
+            else:
+                logger.error(f"❌ Max retries exceeded for [{request_id}]")
+                return {
+                    'success': False, 
+                    'error': f'Request timeout after {self.timeout}s (tried {self.max_retries + 1} times)',
+                    'timeout': True,
+                    'response_time': response_time
+                }
+        
+        except requests.exceptions.ConnectionError as ce:
+            response_time = time.time() - start_time if 'start_time' in locals() else 0
+            logger.error(f"🔌 Connection error [{request_id}] - {str(ce)}")
+            
+            # Retry logic for connection errors
+            if retry_count < self.max_retries:
+                logger.info(f"🔄 Retrying connection [{request_id}] ({retry_count + 1}/{self.max_retries})")
+                time.sleep(2)  # Longer delay for connection issues
+                return self._make_request(method, endpoint, token, params, data, files, retry_count + 1)
+            else:
+                return {
+                    'success': False, 
+                    'error': f'Connection failed: {str(ce)}',
+                    'connection_error': True,
+                    'response_time': response_time
+                }
+        
         except Exception as e:
-            logger.error(f"❌ Request error: {str(e)}")
-            return {'success': False, 'error': str(e)}
+            response_time = time.time() - start_time if 'start_time' in locals() else 0
+            logger.error(f"❌ Unexpected error [{request_id}] - {str(e)}")
+            logger.error(f"🔍 Error type: {type(e).__name__}")
+            return {
+                'success': False, 
+                'error': f'Unexpected error: {str(e)}',
+                'error_type': type(e).__name__,
+                'response_time': response_time
+            }
     
     def search_jobs(self, token: str, **kwargs) -> Dict[str, Any]:
         """
