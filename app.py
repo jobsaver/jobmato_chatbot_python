@@ -21,6 +21,11 @@ from agents.profile_info_agent import ProfileInfoAgent
 from agents.general_chat_agent import GeneralChatAgent
 from utils.response_formatter import ResponseFormatter
 from utils.memory_manager import MemoryManager
+from bson import ObjectId
+from flask_jwt_extended import JWTManager, jwt_required, create_access_token, get_jwt_identity, verify_jwt_in_request
+from werkzeug.utils import secure_filename
+import traceback
+from utils.llm_client import LLMClient
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -352,6 +357,15 @@ class JobMatoChatBot:
 
 # Initialize the chatbot
 chatbot = JobMatoChatBot()
+
+# Define a custom JSON encoder for ObjectId and datetime
+class CustomJSONEncoder(json.JSONEncoder):
+    def default(self, o):
+        if isinstance(o, ObjectId):
+            return str(o)
+        if isinstance(o, datetime):
+            return o.isoformat()
+        return super().default(o)
 
 # WebSocket event handlers with enhanced functionality
 @socketio.on(current_config.SOCKET_EVENTS['connect'])
@@ -693,6 +707,17 @@ def handle_get_user_sessions():
     except Exception as e:
         handle_error('sessions_error', e)
 
+def convert_dates_to_isoformat(data):
+    """Recursively convert datetime objects to ISO 8601 strings."""
+    if isinstance(data, dict):
+        return {k: convert_dates_to_isoformat(v) for k, v in data.items()}
+    elif isinstance(data, list):
+        return [convert_dates_to_isoformat(i) for i in data]
+    elif isinstance(data, datetime):
+        return data.isoformat()
+    else:
+        return data
+
 @socketio.on('load_session')
 def handle_load_session(data):
     """Handle request to load a specific session"""
@@ -719,6 +744,15 @@ def handle_load_session(data):
         # Update active session
         active_sessions[request.sid] = session_id
         
+        # Manually serialize datetime objects in messages
+        for msg in messages:
+            if 'timestamp' in msg and isinstance(msg['timestamp'], datetime):
+                msg['timestamp'] = msg['timestamp'].isoformat()
+            if 'created_at' in msg and isinstance(msg['created_at'], datetime):
+                msg['created_at'] = msg['created_at'].isoformat()
+            if 'updated_at' in msg and isinstance(msg['updated_at'], datetime):
+                msg['updated_at'] = msg['updated_at'].isoformat()
+
         emit('session_loaded', {
             'sessionId': session_id,
             'messages': messages,
