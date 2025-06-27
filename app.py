@@ -307,12 +307,18 @@ class JobMatoChatBot:
                         extracted_data['skills'] = [job_role] if isinstance(job_role, str) else job_role
                         logger.info(f"🎯 Mapped job_role_or_skill string: job_title={job_role}, skills={extracted_data['skills']}")
                 
-                # Map job_title_keywords to job_title
-                if entities.get('job_title_keywords'):
-                    if isinstance(entities['job_title_keywords'], list) and entities['job_title_keywords']:
-                        extracted_data['job_title'] = entities['job_title_keywords'][0]
+                # Map job_title to job_title and skills
+                if entities.get('job_title'):
+                    job_title = entities['job_title']
+                    logger.info(f"🎯 Found job_title: {job_title}")
+                    if isinstance(job_title, list) and job_title:
+                        extracted_data['job_title'] = job_title[0]
+                        extracted_data['skills'] = job_title
+                        logger.info(f"🎯 Mapped job_title list: job_title={job_title[0]}, skills={job_title}")
                     else:
-                        extracted_data['job_title'] = entities['job_title_keywords']
+                        extracted_data['job_title'] = job_title
+                        extracted_data['skills'] = [job_title] if isinstance(job_title, str) else job_title
+                        logger.info(f"🎯 Mapped job_title string: job_title={job_title}, skills={extracted_data['skills']}")
                 
                 # Map skills
                 if entities.get('skills'):
