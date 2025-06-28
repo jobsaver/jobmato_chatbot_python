@@ -596,7 +596,7 @@
                 <h2>Sessions</h2>
                 <p>Manage your conversations</p>
             </div>
-            <div class="sessions-list"></div>
+            <div class="sessions-list" id="sessions-list"></div>
         </div>
         
         <div class="chat-main">
@@ -669,7 +669,11 @@
                 this.socket = null;
                 this.connected = false;
                 this.authenticated = false;
-                this.jwtToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjY4NDcxMDBlYTQxN2IwMGEyMGYzZjA1MSIsImVtYWlsIjoiaGFja3lhYmhheUBnbWFpbC5jb20iLCJpYXQiOjE3NTA1Nzk4MDYsImV4cCI6MTc1MTE4NDYwNn0.5cMF3TDItaJt7JPONtHEF3lAe-qgL8Q8ujwMagC1fVo';
+                this.jwtToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjY4NDcxMDBlYTQxN2IwMGEyMGYzZjA1MSIsImVtYWlsIjoiaGFja3lhYmhheUBnbWFpbC5jb20iLCJpYXQiOjE3NTEwMjgyNzMsImV4cCI6MTc1MTYzMzA3M30.E_x9zxiRGuAXR0thdE6qiEdl87VuzHOtucEz6jERDFA';
+                this.currentSearchQuery = '';
+                this.hasMoreJobs = false;
+                this.currentPage = 1;
+                this.totalJobs = 0;
                 this.initializeWebSocket();
                 this.initializeEventListeners();
                 this.autoResizeTextarea();
@@ -710,49 +714,12 @@
                 }
             }
 
-            renderSessionsList(sessions) {
-                console.log('🎨 Rendering sessions list:', sessions);
-                const sessionsList = document.querySelector('.sessions-list');
-                console.log('📋 Sessions list element:', sessionsList);
-                sessionsList.innerHTML = '';
-                // New Chat button
-                const newChatBtn = document.createElement('button');
-                newChatBtn.className = 'new-chat-btn';
-                newChatBtn.textContent = 'New Chat';
-                newChatBtn.onclick = () => this.createNewSession();
-                sessionsList.appendChild(newChatBtn);
-                console.log('➕ Added New Chat button');
-                // Session items
-                sessions.forEach(session => {
-                    console.log('📝 Creating session item for:', session);
-                    const sessionItem = document.createElement('div');
-                    sessionItem.className = 'session-item' + (session.sessionId === this.sessionId ? ' active' : '');
-                    sessionItem.onclick = () => {
-                        this.sessionId = session.sessionId;
-                        this.fetchChatHistory(session.sessionId);
-                        this.updateActiveSession(session.sessionId);
-                    };
-                    sessionItem.innerHTML = `
-                        <div class="session-title">${session.title || 'Untitled Chat'}</div>
-                        <div class="session-meta">
-                            <span>${session.messageCount || 0} messages</span>
-                            <div class="session-actions">
-                                <button class="session-action-btn" onclick="event.stopPropagation(); chatbot.deleteSession('${session.sessionId}')">Delete</button>
-                            </div>
-                        </div>
-                    `;
-                    sessionsList.appendChild(sessionItem);
-                    console.log('✅ Added session item:', session.sessionId);
-                });
-                console.log('🎯 Finished rendering sessions list');
-            }
-
             createNewSession() {
-                // Use WebSocket to create a new session, then refresh sessions list
-                if (this.socket) {
+                console.log('🆕 Creating new session...');
                     this.socket.emit('init_chat', {});
-                    setTimeout(() => this.fetchSessions(), 1000); // Give backend time to create
-                }
+                 // After creating a new session via socket, we should probably get confirmation
+                // and then refresh the session list. A slight delay might be needed.
+                setTimeout(() => this.fetchSessions(), 1000);
             }
 
             initializeWebSocket() {
@@ -802,6 +769,7 @@
                     console.log('📋 Session status:', data);
                     if (data.connected) {
                         this.sessionId = data.sessionId;
+                        this.updateActiveSession(this.sessionId);
                         this.showSessionInfo(`Session: ${data.sessionId}`);
                     } else {
                         this.showAuthStatus('❌ Session initialization failed: ' + data.error, 'error');
@@ -820,16 +788,24 @@
                     
                     // Track job search state for pagination
                     if (data.type === 'job_card' && data.metadata) {
-                        this.currentSearchQuery = data.metadata.searchQuery || '';
+                        this.currentSearchQuery = data.metadata.searchQuery || data.metadata.originalQuery || '';
                         this.hasMoreJobs = data.metadata.hasMore || false;
+                        this.totalJobs = data.metadata.total || data.metadata.totalJobs || 0;
+                        
                         if (data.metadata.isFollowUp) {
-                            this.currentPage = data.metadata.currentPage || 1;
-                            // Re-enable load more button for follow-up responses
-                            this.updateLoadMoreButton();
+                            // This is a load more response
+                            this.currentPage = data.metadata.currentPage || data.metadata.page || 1;
+                            console.log(`📄 Load more response: page=${this.currentPage}, hasMore=${this.hasMoreJobs}, total=${this.totalJobs}, query="${this.currentSearchQuery}"`);
                         } else {
-                            this.currentPage = 1; // Reset for new search
+                            // This is a new search
+                            this.currentPage = 1;
+                            console.log(`🔍 New search: page=${this.currentPage}, hasMore=${this.hasMoreJobs}, total=${this.totalJobs}, query="${this.currentSearchQuery}"`);
                         }
-                        console.log(`Job search state: hasMore=${this.hasMoreJobs}, page=${this.currentPage}, query="${this.currentSearchQuery}"`);
+                        
+                        // Update load more button state
+                        this.updateLoadMoreButton();
+                        
+                        console.log(`Job search state: hasMore=${this.hasMoreJobs}, page=${this.currentPage}, total=${this.totalJobs}, query="${this.currentSearchQuery}"`);
                     }
                     
                     // Check if response suggests uploading resume
@@ -903,12 +879,13 @@
                 this.socket.on('session_deleted', (data) => {
                     console.log('🗑️ Session deleted:', data);
                     if (data.success) {
-                        // Reload sessions list
-                        this.fetchSessions();
                         // If the deleted session was active, create a new one
                         if (data.sessionId === this.sessionId) {
-                            this.createNewSession();
+                             this.clearChatMessages();
+                             this.sessionId = null;
                         }
+                        // Reload sessions list
+                        this.fetchSessions();
                     }
                 });
                 
@@ -931,7 +908,7 @@
                 // Load user sessions after initialization
                 setTimeout(() => {
                     this.fetchSessions();
-                }, 1000);
+                }, 500);
             }
             
             initializeEventListeners() {
@@ -1022,17 +999,14 @@
             }
             
             loadChatHistory(messages) {
-                // Clear existing messages except welcome
-                const welcomeMessage = this.chatMessages.querySelector('.welcome-message');
-                this.chatMessages.innerHTML = '';
-                if (welcomeMessage) {
-                    this.chatMessages.appendChild(welcomeMessage);
-                }
+                this.clearChatMessages();
                 
                 // Load history messages
+                if(Array.isArray(messages)) {
                 messages.forEach(msg => {
-                    this.addMessage(msg.content, msg.sender === 'user' ? 'user' : 'assistant');
+                        this.addMessage(msg.content, msg.sender === 'user' ? 'user' : 'assistant', msg.full_response);
                 });
+                }
             }
             
             clearChatMessages() {
@@ -1077,23 +1051,54 @@
             }
             
             formatJobResponse(content, jobs) {
-                let html = `<p>${content}</p>`;
+                let html = `<p>${this.formatTextContent(content)}</p>`;
                 
                 if (jobs && jobs.length > 0) {
                     jobs.forEach(job => {
+                        const companyName = (job.company && typeof job.company === 'object') ? job.company.name : job.company;
+
+                        let experienceText = 'Not specified';
+                        if (job.experience && typeof job.experience === 'object') {
+                            if (job.experience.min && job.experience.max) {
+                                experienceText = `${job.experience.min} - ${job.experience.max} years`;
+                            } else if (job.experience.min) {
+                                experienceText = `More than ${job.experience.min} years`;
+                            } else if (job.experience.max) {
+                                experienceText = `Up to ${job.experience.max} years`;
+                            }
+                        } else if (job.experience) {
+                            experienceText = job.experience;
+                        }
+
+                        let salaryText = '';
+                        if (job.salary && typeof job.salary === 'object') {
+                            if (job.salary.min && job.salary.max) {
+                                salaryText = `${job.salary.min} - ${job.salary.max}`;
+                            } else if (job.salary.min) {
+                                salaryText = `From ${job.salary.min}`;
+                            } else if (job.salary.max) {
+                                salaryText = `Up to ${job.salary.max}`;
+                            }
+                            if (job.salary.currency) {
+                                salaryText += ` ${job.salary.currency}`;
+                            }
+                        } else if (job.salary) {
+                            salaryText = job.salary;
+                        }
+
                         html += `
                             <div class="job-card">
                                 <h4>${job.job_title || job.title || 'Job Title'}</h4>
-                                <p><strong>Company:</strong> ${job.company || 'Not specified'}</p>
+                                <p><strong>Company:</strong> ${companyName || 'Not specified'}</p>
                                 <p><strong>Location:</strong> ${job.location || (job.locations && job.locations.length > 0 ? job.locations.join(', ') : 'Not specified')}</p>
-                                <p><strong>Experience:</strong> ${job.experience || 'Not specified'}</p>
-                                ${job.salary ? `<p><strong>Salary:</strong> ${job.salary}</p>` : ''}
+                                <p><strong>Experience:</strong> ${experienceText}</p>
+                                ${salaryText ? `<p><strong>Salary:</strong> ${salaryText}</p>` : ''}
                                 ${job.work_mode ? `<p><strong>Work Mode:</strong> ${job.work_mode}</p>` : ''}
                                 ${job.job_type ? `<p><strong>Job Type:</strong> ${job.job_type}</p>` : ''}
-                                ${job.skills && job.skills.length > 0 ? `<p><strong>Skills:</strong> ${job.skills.slice(0, 5).join(', ')}${job.skills.length > 5 ? '...' : ''}</p>` : ''}
-                                ${job.description ? `<p><strong>Description:</strong> ${job.description.length > 150 ? job.description.substring(0, 150) + '...' : job.description}</p>` : ''}
+                                ${job.skills && Array.isArray(job.skills) && job.skills.length > 0 ? `<p><strong>Skills:</strong> ${job.skills.slice(0, 5).join(', ')}${job.skills.length > 5 ? '...' : ''}</p>` : ''}
+                                ${job.description ? `<p><strong>Description:</strong> ${job.description.length > 150 ? this.formatTextContent(job.description.substring(0, 150)) + '...' : this.formatTextContent(job.description)}</p>` : ''}
                                 ${job.posted_date ? `<p><strong>Posted:</strong> ${new Date(job.posted_date).toLocaleDateString()}</p>` : ''}
-                                ${job.apply_url ? `<p><a href="${job.apply_url}" target="_blank" style="color: #3b82f6; text-decoration: none;">Apply Now →</a></p>` : ''}
+                                ${job.apply_url ? `<p><a href="${job.apply_url}" target="_blank">Apply Now →</a></p>` : ''}
                             </div>
                         `;
                     });
@@ -1294,7 +1299,9 @@
                 if (loadMoreBtn) {
                     if (this.hasMoreJobs) {
                         loadMoreBtn.disabled = false;
-                        loadMoreBtn.textContent = 'Load More Jobs';
+                        const nextPageStart = this.currentPage * 10 + 1;
+                        const nextPageEnd = Math.min((this.currentPage + 1) * 10, this.totalJobs);
+                        loadMoreBtn.textContent = `Load More Jobs (${nextPageStart}-${nextPageEnd} of ${this.totalJobs})`;
                     } else {
                         loadMoreBtn.disabled = true;
                         loadMoreBtn.textContent = 'No More Jobs';
@@ -1303,12 +1310,14 @@
             }
             
             loadMoreJobs() {
+                console.log(`🔄 Load More Jobs called - hasMore: ${this.hasMoreJobs}, query: "${this.currentSearchQuery}", currentPage: ${this.currentPage}`);
+                
                 if (!this.hasMoreJobs || !this.currentSearchQuery) {
-                    console.log('No more jobs to load or no search query');
+                    console.log('❌ Cannot load more jobs - hasMoreJobs:', this.hasMoreJobs, 'currentSearchQuery:', this.currentSearchQuery);
                     return;
                 }
                 
-                console.log(`Loading more jobs for query: "${this.currentSearchQuery}", page: ${this.currentPage + 1}`);
+                console.log(`📄 Loading more jobs for query: "${this.currentSearchQuery}", page: ${this.currentPage + 1}`);
                 
                 // Disable the load more button
                 const loadMoreBtn = document.querySelector('.load-more-btn');
@@ -1318,10 +1327,12 @@
                 }
                 
                 // Send load more request
-                this.socket.emit('load_more_jobs', {
+                const loadMoreData = {
                     page: this.currentPage + 1,
                     searchQuery: this.currentSearchQuery
-                });
+                };
+                console.log('📤 Sending load_more_jobs event with data:', loadMoreData);
+                this.socket.emit('load_more_jobs', loadMoreData);
                 
                 // Set a timeout to re-enable button if no response
                 setTimeout(() => {
@@ -1330,7 +1341,7 @@
                         loadMoreBtn.textContent = 'Load More Jobs';
                         console.log('Load more request timed out, re-enabling button');
                     }
-                }, 10000); // 10 second timeout
+                }, 15000); // 15 second timeout
             }
             
             // Session Management Methods
@@ -1359,11 +1370,6 @@
                 });
             }
             
-            createNewSession() {
-                console.log('🆕 Creating new session...');
-                this.socket.emit('init_chat', {});
-            }
-            
             renderSessionsList(sessions) {
                 const sessionsList = document.getElementById('sessions-list');
                 if (!sessionsList) return;
@@ -1374,7 +1380,7 @@
                 const newChatBtn = document.createElement('div');
                 newChatBtn.className = 'session-item new-chat';
                 newChatBtn.innerHTML = `
-                    <div class="session-content">
+                    <div class="session-content" style="cursor: pointer;">
                         <div class="session-title">➕ New Chat</div>
                         <div class="session-meta">Start a new conversation</div>
                     </div>
@@ -1386,43 +1392,43 @@
                 sessions.forEach(session => {
                     const sessionItem = document.createElement('div');
                     sessionItem.className = 'session-item';
-                    sessionItem.dataset.sessionId = session.session_id;
+                    sessionItem.dataset.sessionId = session.sessionId;
                     
-                    const isActive = session.session_id === this.sessionId;
+                    const isActive = session.sessionId === this.sessionId;
                     if (isActive) {
                         sessionItem.classList.add('active');
                     }
                     
                     sessionItem.innerHTML = `
-                        <div class="session-content">
+                        <div class="session-content" style="cursor: pointer;">
                             <div class="session-title">${session.title || 'Untitled Chat'}</div>
                             <div class="session-meta">
-                                ${session.message_count || 0} messages • ${this.formatDate(session.last_updated || session.created_at)}
+                                ${session.message_count || session.messageCount || 0} messages • ${this.formatDate(session.last_updated || session.lastUpdated || session.created_at)}
                             </div>
                         </div>
                         <div class="session-actions">
-                            <button class="edit-title-btn" title="Edit title">✏️</button>
-                            <button class="delete-session-btn" title="Delete session">🗑️</button>
+                            <button class="edit-title-btn session-action-btn" title="Edit title">✏️</button>
+                            <button class="delete-session-btn session-action-btn" title="Delete session">🗑️</button>
                         </div>
                     `;
                     
                     // Add click handler for session selection
                     sessionItem.querySelector('.session-content').addEventListener('click', () => {
                         if (!isActive) {
-                            this.loadSession(session.session_id);
+                            this.loadSession(session.sessionId);
                         }
                     });
                     
                     // Add edit title handler
                     sessionItem.querySelector('.edit-title-btn').addEventListener('click', (e) => {
                         e.stopPropagation();
-                        this.editSessionTitle(session.session_id, session.title || 'Untitled Chat');
+                        this.editSessionTitle(session.sessionId, session.title || 'Untitled Chat');
                     });
                     
                     // Add delete handler
                     sessionItem.querySelector('.delete-session-btn').addEventListener('click', (e) => {
                         e.stopPropagation();
-                        this.deleteSession(session.session_id);
+                        this.deleteSession(session.sessionId);
                     });
                     
                     sessionsList.appendChild(sessionItem);

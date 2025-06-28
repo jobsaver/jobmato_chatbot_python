@@ -115,11 +115,17 @@ class BaseAgent(ABC, JobMatoToolsMixin):
     
     async def get_profile_data(self, token: str, base_url: Optional[str] = None) -> Dict[str, Any]:
         """Get user profile information"""
-        return await self.call_api('/api/rag/profile', token, base_url=base_url)
+        logger.info(f"👤 Getting profile data with token: {token[:20] if token else 'None'}...")
+        result = await self.get_profile_tool(token, base_url)
+        logger.info(f"👤 Profile data result: {result}")
+        return result
     
     async def get_resume_data(self, token: str, base_url: Optional[str] = None) -> Dict[str, Any]:
         """Get user resume information"""
-        return await self.call_api('/api/rag/resume', token, base_url=base_url)
+        logger.info(f"📄 Getting resume data with token: {token[:20] if token else 'None'}...")
+        result = await self.get_resume_tool(token, base_url)
+        logger.info(f"📄 Resume data result: {result}")
+        return result
     
     @abstractmethod
     async def process_request(self, routing_data: Dict[str, Any]) -> Dict[str, Any]:

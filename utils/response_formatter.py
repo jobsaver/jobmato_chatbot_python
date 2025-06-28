@@ -25,8 +25,9 @@ class ResponseFormatter:
             'resume_analysis': 'resume_analysis',
             'career_advice': 'career_advice',
             'project_suggestion': 'project_suggestion',
-            'resume_upload_required': 'resume_upload_required',
-            'resume_upload_success': 'resume_upload_success'
+                    'resume_upload_required': 'resume_upload_required',
+        'resume_upload_success': 'resume_upload_success',
+        'upload_prompt': 'upload_prompt'
         }
         
         message_type = type_mapping.get(response_type, 'plain_text')
@@ -211,6 +212,29 @@ class ResponseFormatter:
             content=message,
             response_type='resume_upload_success',
             metadata=upload_success_metadata
+        )
+
+    def format_upload_prompt_response(self, message: str = None, metadata: Dict[str, Any] = None) -> Dict[str, Any]:
+        """Format upload prompt response to show upload card in frontend"""
+        default_message = "Upload your resume to get personalized job recommendations and career advice."
+        
+        upload_prompt_metadata = {
+            'agent': 'upload_prompt',
+            'intent': 'upload_prompt',
+            'confidence': 1.0,
+            'showUploadCard': True,
+            'uploadRequired': False,
+            'allowUpload': True,
+            'uploadOptions': ['PDF', 'DOC', 'DOCX'],
+            'maxFileSize': '10MB',
+            'timestamp': datetime.now(timezone.utc).isoformat() + "Z",
+            **(metadata or {})
+        }
+        
+        return self.format_chat_response(
+            content=message or default_message,
+            response_type='upload_prompt',
+            metadata=upload_prompt_metadata
         )
     
     def _format_single_job(self, job: Dict[str, Any]) -> Dict[str, Any]:

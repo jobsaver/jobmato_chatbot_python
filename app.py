@@ -21,6 +21,11 @@ from agents.profile_info_agent import ProfileInfoAgent
 from agents.general_chat_agent import GeneralChatAgent
 from utils.response_formatter import ResponseFormatter
 from utils.memory_manager import MemoryManager
+from bson import ObjectId
+from flask_jwt_extended import JWTManager, jwt_required, create_access_token, get_jwt_identity, verify_jwt_in_request
+from werkzeug.utils import secure_filename
+import traceback
+from utils.llm_client import LLMClient
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -35,52 +40,95 @@ CORS(app, origins=["http://localhost:5173", "http://127.0.0.1:5173", "http://loc
 # Get configuration
 current_config = config[os.environ.get('FLASK_ENV', 'development')]
 
-# Initialize SocketIO with enhanced configuration
+# Initialize SocketIO with enhanced configuration and error handling
 socketio = SocketIO(
     app, 
     cors_allowed_origins="*", 
     async_mode='threading',
     connect_timeout=current_config.SOCKETIO_CONNECT_TIMEOUT,
-    transports=['websocket', 'polling']
+    ping_timeout=60,
+    ping_interval=25,
+    transports=['websocket', 'polling'],
+    logger=False,  # Disable socketio logger to reduce noise
+    engineio_logger=False,
+    always_connect=True,
+    # Add error handling options
+    allow_upgrades=True,
+    compression=True
 )
 
 # Redis connection for session management
 redis_client = None
-try:
-    redis_url = current_config.REDIS_URL
-    redis_ssl = current_config.REDIS_SSL
-    redis_password = current_config.REDIS_PASSWORD
+redis_connection_attempts = 0
+MAX_REDIS_RETRY_ATTEMPTS = 3
+
+def get_redis_client():
+    """Get Redis client with retry mechanism"""
+    global redis_client, redis_connection_attempts
     
-    # For Redis with password authentication
-    if redis_password and redis_password != 'None':
-        redis_client = redis.from_url(
-            redis_url,
-            password=redis_password,
-            decode_responses=True,
-            socket_connect_timeout=5,
-            socket_timeout=5,
-            retry_on_timeout=False,
-            health_check_interval=0  # Disable health check to avoid recursion
-        )
-    else:
-        # For local Redis or non-SSL connections without password
-        redis_client = redis.from_url(
-            redis_url,
-            decode_responses=True,
-            socket_connect_timeout=5,
-            socket_timeout=5,
-            retry_on_timeout=False,
-            health_check_interval=0  # Disable health check to avoid recursion
-        )
+    if redis_client is None and redis_connection_attempts < MAX_REDIS_RETRY_ATTEMPTS:
+        try:
+            redis_connection_attempts += 1
+            redis_url = current_config.REDIS_URL
+            redis_ssl = current_config.REDIS_SSL
+            redis_password = current_config.REDIS_PASSWORD
+            
+            # For Redis with password authentication
+            if redis_password and redis_password != 'None':
+                redis_client = redis.from_url(
+                    redis_url,
+                    password=redis_password,
+                    decode_responses=True,
+                    socket_connect_timeout=3,
+                    socket_timeout=3,
+                    retry_on_timeout=False,
+                    health_check_interval=0
+                )
+            else:
+                # For local Redis or non-SSL connections without password
+                redis_client = redis.from_url(
+                    redis_url,
+                    decode_responses=True,
+                    socket_connect_timeout=3,
+                    socket_timeout=3,
+                    retry_on_timeout=False,
+                    health_check_interval=0
+                )
+            
+            # Test the connection
+            redis_client.ping()
+            logger.info("✅ Redis connected successfully")
+            redis_connection_attempts = 0  # Reset on success
+            
+        except Exception as e:
+            logger.warning(f"⚠️ Redis connection attempt {redis_connection_attempts} failed: {str(e)}")
+            redis_client = None
+            if redis_connection_attempts >= MAX_REDIS_RETRY_ATTEMPTS:
+                logger.error("❌ Redis connection failed after maximum attempts. Using in-memory storage.")
     
-    # Test the connection
-    redis_client.ping()
-    logger.info("✅ Redis connected successfully")
-    
-except Exception as e:
-    logger.warning(f"⚠️ Redis not available: {str(e)}")
-    logger.info("🔄 Falling back to in-memory session storage")
-    redis_client = None
+    return redis_client
+
+def safe_redis_operation(operation, *args, **kwargs):
+    """Safely execute Redis operations with error handling"""
+    try:
+        client = get_redis_client()
+        if client is None:
+            return None
+        return operation(client, *args, **kwargs)
+    except redis.ConnectionError as e:
+        logger.warning(f"⚠️ Redis connection error: {str(e)}")
+        global redis_client
+        redis_client = None  # Reset client to trigger reconnection
+        return None
+    except redis.TimeoutError as e:
+        logger.warning(f"⚠️ Redis timeout error: {str(e)}")
+        return None
+    except Exception as e:
+        logger.error(f"❌ Redis operation error: {str(e)}")
+        return None
+
+# Initialize Redis with retry mechanism
+get_redis_client()
 
 # Global session tracking
 connected_users = {}  # socket_id -> user_id
@@ -124,25 +172,34 @@ def get_user_data():
     return user_data_store.get(request.sid, {})
 
 def store_user_session(user_id: str, socket_id: str):
-    if not redis_client:
-        return
-    try:
-        redis_client.hset(f"user_sessions:{user_id}", "socketId", socket_id)
-        redis_client.hset(f"user_sessions:{user_id}", "connectedAt", datetime.now().isoformat())
-        redis_client.expire(f"user_sessions:{user_id}", current_config.SESSION_TIMEOUT_HOURS * 3600)
-        redis_client.set(f"socket_user:{socket_id}", user_id, current_config.SESSION_TIMEOUT_HOURS * 3600)
+    """Store user session with safe Redis operations"""
+    def _store_operation(client, user_id, socket_id):
+        client.hset(f"user_sessions:{user_id}", "socketId", socket_id)
+        client.hset(f"user_sessions:{user_id}", "connectedAt", datetime.now().isoformat())
+        client.expire(f"user_sessions:{user_id}", current_config.SESSION_TIMEOUT_HOURS * 3600)
+        client.set(f"socket_user:{socket_id}", user_id, current_config.SESSION_TIMEOUT_HOURS * 3600)
+        return True
+    
+    result = safe_redis_operation(_store_operation, user_id, socket_id)
+    if result:
         logger.info(f"💾 Stored user session in Redis: {user_id} -> {socket_id}")
-    except Exception as e:
-        logger.error(f"❌ Failed to store user session in Redis: {str(e)}")
+    else:
+        logger.warning(f"⚠️ Could not store user session in Redis, using in-memory fallback")
+        # Fallback to in-memory storage
+        connected_users[socket_id] = user_id
 
 def get_user_session_from_redis(user_id: str) -> Optional[str]:
-    if not redis_client:
-        return None
-    try:
-        return redis_client.hget(f"user_sessions:{user_id}", "socketId")
-    except Exception as e:
-        logger.error(f"❌ Failed to get user session from Redis: {str(e)}")
-        return None
+    """Get user session with safe Redis operations"""
+    def _get_operation(client, user_id):
+        return client.hget(f"user_sessions:{user_id}", "socketId")
+    
+    result = safe_redis_operation(_get_operation, user_id)
+    if result is None:
+        # Fallback to in-memory lookup
+        for socket_id, stored_user_id in connected_users.items():
+            if stored_user_id == user_id:
+                return socket_id
+    return result
 
 def broadcast_to_user(user_id: str, event: str, data: dict):
     try:
@@ -165,21 +222,50 @@ def broadcast_typing_status(user_id: str, is_typing: bool):
         logger.error(f"❌ Error broadcasting typing status: {str(e)}")
 
 def handle_error(error_type: str, error: Exception, session_id: str = None):
+    """Enhanced error handler with better logging and user feedback"""
     logger.error(f"❌ {error_type}: {str(error)}")
     error_message = str(error) if isinstance(error, Exception) else "An error occurred"
     error_code = current_config.ERROR_CODES.get(error_type.upper(), error_type.upper())
-    emit(current_config.SOCKET_EVENTS['error'], {
-        'type': error_type,
-        'code': error_code,
-        'message': error_message,
-        'sessionId': session_id,
-        'timestamp': datetime.now().isoformat()
-    }, room=request.sid)
-    emit(error_type, {
+    
+    try:
+        emit(current_config.SOCKET_EVENTS['error'], {
+            'type': error_type,
+            'code': error_code,
+            'message': error_message,
+            'sessionId': session_id,
+            'timestamp': datetime.now().isoformat()
+        }, room=request.sid)
+        
+        emit(error_type, {
+            'error': True,
+            'message': error_message,
+            'code': error_code
+        }, room=request.sid)
+    except Exception as emit_error:
+        logger.error(f"❌ Failed to emit error message: {str(emit_error)}")
+
+@socketio.on_error_default
+def default_error_handler(e):
+    """Global error handler for Socket.IO"""
+    logger.error(f"❌ Socket.IO error: {str(e)}")
+    try:
+        emit('error', {
+            'message': 'An unexpected error occurred. Please try again.',
+            'code': 'SOCKET_ERROR',
+            'timestamp': datetime.now().isoformat()
+        })
+    except Exception as emit_error:
+        logger.error(f"❌ Failed to emit error in global handler: {str(emit_error)}")
+
+@app.errorhandler(Exception)
+def handle_app_error(error):
+    """Global Flask error handler"""
+    logger.error(f"❌ Flask application error: {str(error)}")
+    return jsonify({
         'error': True,
-        'message': error_message,
-        'code': error_code
-    }, room=request.sid)
+        'message': 'An internal server error occurred',
+        'code': 'INTERNAL_ERROR'
+    }), 500
 
 class JobMatoChatBot:
     def __init__(self):
@@ -259,14 +345,101 @@ class JobMatoChatBot:
                 'error': f'Classification parsing failed. Original LLM response was: "{raw_response}". Error: {parse_error or "Unknown parsing error."}'
             }
         
-        # Ensure extractedData is always an object
-        classification['extractedData'] = classification.get('extractedData') or {}
+        # Map query classifier response format to expected extractedData format
+        # Query classifier might return different field names, so check all possibilities
+        extracted_data = (
+            classification.get('extractedData') or 
+            classification.get('parameters') or 
+            classification.get('query_parameters') or 
+            classification.get('data') or 
+            {}
+        )
+        
+        # Handle 'keywords' from query classifier
+        keywords = classification.get('keywords')
+        if keywords and not extracted_data:
+            logger.info(f"📋 Found keywords: {keywords}")
+            extracted_data = {
+                'query': keywords,
+                'job_title': keywords,
+                'skills': [keywords] if isinstance(keywords, str) else keywords
+            }
+            logger.info(f"🔄 Mapped keywords to extractedData: {extracted_data}")
+        
+        # Handle 'entities' structure from query classifier
+        entities = classification.get('entities')
+        if entities and isinstance(entities, dict):
+            logger.info(f"📋 Found entities structure: {entities}")
+            
+            # Map entities to extractedData format
+            if not extracted_data:  # Only use entities if no other data found
+                extracted_data = {}
+                
+                # Map job_role_or_skill to job_title and skills
+                if entities.get('job_role_or_skill'):
+                    job_role = entities['job_role_or_skill']
+                    logger.info(f"🎯 Found job_role_or_skill: {job_role}")
+                    if isinstance(job_role, list) and job_role:
+                        extracted_data['job_title'] = job_role[0]
+                        extracted_data['skills'] = job_role
+                        logger.info(f"🎯 Mapped job_role_or_skill list: job_title={job_role[0]}, skills={job_role}")
+                    else:
+                        extracted_data['job_title'] = job_role
+                        extracted_data['skills'] = [job_role] if isinstance(job_role, str) else job_role
+                        logger.info(f"🎯 Mapped job_role_or_skill string: job_title={job_role}, skills={extracted_data['skills']}")
+                
+                # Map job_title to job_title and skills
+                if entities.get('job_title'):
+                    job_title = entities['job_title']
+                    logger.info(f"🎯 Found job_title: {job_title}")
+                    if isinstance(job_title, list) and job_title:
+                        extracted_data['job_title'] = job_title[0]
+                        extracted_data['skills'] = job_title
+                        logger.info(f"🎯 Mapped job_title list: job_title={job_title[0]}, skills={job_title}")
+                    else:
+                        extracted_data['job_title'] = job_title
+                        extracted_data['skills'] = [job_title] if isinstance(job_title, str) else job_title
+                        logger.info(f"🎯 Mapped job_title string: job_title={job_title}, skills={extracted_data['skills']}")
+                
+                # Map skills
+                if entities.get('skills'):
+                    extracted_data['skills'] = entities['skills']
+                
+                # Map location
+                if entities.get('location') and entities['location']:
+                    if isinstance(entities['location'], list):
+                        extracted_data['location'] = entities['location'][0] if entities['location'] else None
+                    else:
+                        extracted_data['location'] = entities['location']
+                
+                # Map experience_level
+                if entities.get('experience_level') and entities['experience_level']:
+                    if isinstance(entities['experience_level'], list):
+                        extracted_data['experience_level'] = entities['experience_level'][0] if entities['experience_level'] else None
+                    else:
+                        extracted_data['experience_level'] = entities['experience_level']
+                
+                # Map job_type
+                if entities.get('job_type') and entities['job_type']:
+                    if isinstance(entities['job_type'], list):
+                        extracted_data['job_type'] = entities['job_type'][0] if entities['job_type'] else None
+                    else:
+                        extracted_data['job_type'] = entities['job_type']
+                
+                logger.info(f"🔄 Mapped entities to extractedData: {extracted_data}")
+        
+        # Ensure it's always an object
+        if not isinstance(extracted_data, dict):
+            extracted_data = {}
+        
+        logger.info(f"✅ Final mapped extractedData: {extracted_data}")
+        logger.info(f"📋 Original classification keys: {list(classification.keys())}")
         
         # Build routing data
         routing_data = {
             'category': classification['category'],
             'confidence': classification.get('confidence', 0.8),
-            'extractedData': classification['extractedData'],
+            'extractedData': extracted_data,
             'searchQuery': classification.get('searchQuery') or original_data.get('chatInput', ''),
             'originalQuery': original_data.get('chatInput', ''),
             'body': original_data,
@@ -353,6 +526,15 @@ class JobMatoChatBot:
 # Initialize the chatbot
 chatbot = JobMatoChatBot()
 
+# Define a custom JSON encoder for ObjectId and datetime
+class CustomJSONEncoder(json.JSONEncoder):
+    def default(self, o):
+        if isinstance(o, ObjectId):
+            return str(o)
+        if isinstance(o, datetime):
+            return o.isoformat()
+        return super().default(o)
+
 # WebSocket event handlers with enhanced functionality
 @socketio.on(current_config.SOCKET_EVENTS['connect'])
 def handle_connect(auth=None):
@@ -393,19 +575,48 @@ def disconnect_unauthorized():
 
 @socketio.on(current_config.SOCKET_EVENTS['disconnect'])
 def handle_disconnect():
-    user_id = get_user_id()
-    session_id = active_sessions.get(request.sid)
-    logger.info(f"👋 Client disconnected: {request.sid}")
-    if user_id and redis_client:
+    """Handle client disconnection with comprehensive cleanup"""
+    try:
+        user_id = get_user_id()
+        session_id = active_sessions.get(request.sid)
+        logger.info(f"👋 Client disconnected: {request.sid}")
+        
+        # Clean up Redis session data with safe operations
+        if user_id:
+            def _cleanup_operation(client, user_id, socket_id):
+                client.hdel(f"user_sessions:{user_id}", "socketId")
+                client.delete(f"socket_user:{socket_id}")
+                return True
+            
+            result = safe_redis_operation(_cleanup_operation, user_id, request.sid)
+            if result:
+                logger.info(f"🧹 Cleaned up Redis session data for user: {user_id}")
+            else:
+                logger.warning(f"⚠️ Could not clean up Redis data for user: {user_id}")
+        
+        # Clean up in-memory data
+        connected_users.pop(request.sid, None)
+        active_sessions.pop(request.sid, None)
+        user_data_store.pop(request.sid, None)
+        
+        # Leave any rooms
+        if user_id:
+            try:
+                leave_room(user_id)
+            except Exception as e:
+                logger.warning(f"⚠️ Error leaving room {user_id}: {str(e)}")
+        
+        logger.info(f"✅ Cleanup completed for socket: {request.sid}")
+        
+    except Exception as e:
+        logger.error(f"❌ Error during disconnect cleanup: {str(e)}")
+        # Ensure basic cleanup even if there are errors
         try:
-            redis_client.hdel(f"user_sessions:{user_id}", "socketId")
-            redis_client.delete(f"socket_user:{request.sid}")
-            logger.info(f"🧹 Cleaned up Redis session data for user: {user_id}")
-        except Exception as e:
-            logger.error(f"❌ Failed to clean up Redis session data: {str(e)}")
-    connected_users.pop(request.sid, None)
-    active_sessions.pop(request.sid, None)
-    user_data_store.pop(request.sid, None)  # Clean up user data
+            connected_users.pop(request.sid, None)
+            active_sessions.pop(request.sid, None)
+            user_data_store.pop(request.sid, None)
+        except Exception as cleanup_error:
+            logger.error(f"❌ Critical error during basic cleanup: {str(cleanup_error)}")
 
 @socketio.on(current_config.SOCKET_EVENTS['init_chat'])
 def handle_init_chat(data=None):
@@ -603,18 +814,53 @@ def handle_send_message(data):
         if not response.get('content'):
             raise Exception("Empty response content received from chatbot")
         
-        # Store conversation in database
-        try:
-            asyncio.run(chatbot.memory_manager.store_conversation(
-                session_id=session_id,
-                user_message=message,
-                assistant_message=response.get('content', ''),
-                metadata=response.get('metadata', {}),
-                user_id=user_id
-            ))
-            logger.info(f"💾 Conversation stored for session {session_id}")
-        except Exception as e:
-            logger.error(f"❌ Failed to store conversation: {str(e)}")
+        # Store search context in Redis for pagination if this is a job search
+        if response.get('type') == 'job_card' and response.get('metadata'):
+            metadata = response.get('metadata', {})
+            if redis_client:
+                try:
+                    # Store comprehensive search context
+                    search_context = {
+                        'original_query': message,
+                        'search_query': message,
+                        'user_message': message,
+                        'response_type': response.get('type'),
+                        'search_params': metadata.get('searchParams', {}),
+                        'last_page': metadata.get('currentPage', 1),
+                        'has_more': metadata.get('hasMore', False),
+                        'total_jobs': metadata.get('totalJobs', 0)
+                    }
+                    redis_client.setex(f"last_search_context:{session_id}", 3600, json.dumps(search_context))
+                    logger.info(f"💾 Stored search context for session {session_id}: {search_context}")
+                except Exception as e:
+                    logger.warning(f"⚠️ Failed to store search context: {str(e)}")
+
+        # Store conversation in database with retry mechanism
+        max_db_retries = 3
+        db_retry_count = 0
+        conversation_stored = False
+        
+        while db_retry_count < max_db_retries and not conversation_stored:
+            try:
+                asyncio.run(chatbot.memory_manager.store_conversation(
+                    session_id=session_id,
+                    user_message=message,
+                    assistant_message=response.get('content', ''),
+                    metadata=response.get('metadata', {}),
+                    user_id=user_id
+                ))
+                logger.info(f"💾 Conversation stored for session {session_id}")
+                conversation_stored = True
+            except Exception as e:
+                db_retry_count += 1
+                logger.warning(f"⚠️ Database store attempt {db_retry_count} failed: {str(e)}")
+                if db_retry_count >= max_db_retries:
+                    logger.error(f"❌ Failed to store conversation after {max_db_retries} attempts: {str(e)}")
+                    # Continue processing even if storage fails
+                else:
+                    # Wait a bit before retrying
+                    import time
+                    time.sleep(0.5)
         
         # Cache response for potential replay
         if redis_client:
@@ -689,9 +935,24 @@ def handle_get_user_sessions():
             raise Exception("User not authenticated")
         
         sessions = asyncio.run(chatbot.memory_manager.get_user_sessions(user_id))
-        emit('user_sessions', {'sessions': sessions}, room=request.sid)
+        
+        # Convert datetime objects to ISO format for JSON serialization
+        sessions_converted = convert_dates_to_isoformat(sessions)
+        
+        emit('user_sessions', {'sessions': sessions_converted}, room=request.sid)
     except Exception as e:
         handle_error('sessions_error', e)
+
+def convert_dates_to_isoformat(data):
+    """Recursively convert datetime objects to ISO 8601 strings."""
+    if isinstance(data, dict):
+        return {k: convert_dates_to_isoformat(v) for k, v in data.items()}
+    elif isinstance(data, list):
+        return [convert_dates_to_isoformat(i) for i in data]
+    elif isinstance(data, datetime):
+        return data.isoformat()
+    else:
+        return data
 
 @socketio.on('load_session')
 def handle_load_session(data):
@@ -719,6 +980,15 @@ def handle_load_session(data):
         # Update active session
         active_sessions[request.sid] = session_id
         
+        # Manually serialize datetime objects in messages
+        for msg in messages:
+            if 'timestamp' in msg and isinstance(msg['timestamp'], datetime):
+                msg['timestamp'] = msg['timestamp'].isoformat()
+            if 'created_at' in msg and isinstance(msg['created_at'], datetime):
+                msg['created_at'] = msg['created_at'].isoformat()
+            if 'updated_at' in msg and isinstance(msg['updated_at'], datetime):
+                msg['updated_at'] = msg['updated_at'].isoformat()
+
         emit('session_loaded', {
             'sessionId': session_id,
             'messages': messages,
@@ -800,12 +1070,37 @@ def handle_update_session_title(data):
 
 @socketio.on(current_config.SOCKET_EVENTS['ping'])
 def handle_ping():
-    """Connection health check"""
+    """Enhanced connection health check with system status"""
     try:
-        emit(current_config.SOCKET_EVENTS['pong'], room=request.sid)
-        logger.debug(f"🏓 Ping-pong with client: {request.sid}")
+        # Check Redis connection status
+        redis_status = "connected" if get_redis_client() is not None else "disconnected"
+        
+        # Check database connection status
+        db_status = "unknown"
+        try:
+            # Quick database health check
+            asyncio.run(chatbot.memory_manager.health_check())
+            db_status = "connected"
+        except Exception:
+            db_status = "disconnected"
+        
+        emit(current_config.SOCKET_EVENTS['pong'], {
+            'timestamp': datetime.now().isoformat(),
+            'redis_status': redis_status,
+            'db_status': db_status,
+            'server_status': 'healthy'
+        }, room=request.sid)
+        
+        logger.debug(f"🏓 Ping-pong with client: {request.sid} (Redis: {redis_status}, DB: {db_status})")
     except Exception as e:
         logger.error(f"❌ Error handling ping: {str(e)}")
+        try:
+            emit('error', {
+                'message': 'Health check failed',
+                'code': 'HEALTH_CHECK_ERROR'
+            }, room=request.sid)
+        except Exception:
+            pass  # Fail silently if we can't even emit errors
 
 @socketio.on('load_more_jobs')
 def handle_load_more_jobs(data):
@@ -818,7 +1113,7 @@ def handle_load_more_jobs(data):
             raise Exception("User not authenticated or session not initialized")
         
         # Get pagination parameters
-        current_page = data.get('page', 1)
+        current_page = data.get('page', 2)  # Default to page 2 for load more
         search_query = data.get('searchQuery', '')
         
         logger.info(f"📄 Loading more jobs for user {user_id}, page {current_page}, query: {search_query}")
@@ -837,14 +1132,23 @@ def handle_load_more_jobs(data):
             except Exception as e:
                 logger.warning(f"⚠️ Could not retrieve search context from Redis: {str(e)}")
         
-        # If no search context found, we can't do a proper follow-up search
+        # If no search context found, try to use the provided search query as fallback
         if not extracted_data:
-            emit(current_config.SOCKET_EVENTS['receive_message'], {
-                'content': 'Unable to load more jobs. Please perform a new search first.',
-                'type': 'plain_text',
-                'metadata': {'error': 'No search context'}
-            }, room=request.sid)
-            return
+            if search_query and search_query.strip():
+                logger.info(f"🔄 No stored context, using provided search query: {search_query}")
+                extracted_data = {
+                    'original_query': search_query,
+                    'query': search_query,
+                    'job_title': search_query,
+                    'skills': [search_query]
+                }
+            else:
+                emit(current_config.SOCKET_EVENTS['receive_message'], {
+                    'content': 'Unable to load more jobs. Please perform a new search first.',
+                    'type': 'plain_text',
+                    'metadata': {'error': 'No search context'}
+                }, room=request.sid)
+                return
         
         # Prepare routing data for follow-up search
         routing_data = {
@@ -862,6 +1166,7 @@ def handle_load_more_jobs(data):
         response = asyncio.run(chatbot.job_search_agent.search_jobs_follow_up(routing_data, current_page))
         
         if response:
+            # Handle the response through the agent response handler
             handle_agent_response(request, response)
         else:
             emit(current_config.SOCKET_EVENTS['receive_message'], {
@@ -1338,10 +1643,14 @@ def get_user_sessions_api():
         page = int(request.args.get('page', 1))
         limit = int(request.args.get('limit', 10))
         sessions = asyncio.run(chatbot.memory_manager.get_user_sessions(user_id, limit=1000))  # get all, paginate below
-        total = len(sessions)
+        
+        # Convert datetime objects to ISO format for JSON serialization
+        sessions_converted = convert_dates_to_isoformat(sessions)
+        
+        total = len(sessions_converted)
         start = (page - 1) * limit
         end = start + limit
-        paginated = sessions[start:end]
+        paginated = sessions_converted[start:end]
         return jsonify({
             'success': True,
             'sessions': paginated,
@@ -1387,18 +1696,20 @@ def handle_create_new_chat(data=None):
         # Create new session
         session_id = f"session_{user_id}_{int(datetime.now().timestamp())}"
         
-        # Cache session in Redis
-        if redis_client:
-            try:
-                session_data = {
-                    'userId': user_id,
-                    'sessionId': session_id,
-                    'createdAt': datetime.now().isoformat()
-                }
-                redis_client.setex(f"chat_session:{session_id}", current_config.SESSION_TIMEOUT_HOURS * 3600, json.dumps(session_data))
-                redis_client.setex(f"last_session:{user_id}", current_config.SESSION_TIMEOUT_HOURS * 3600, session_id)
-            except Exception as redis_error:
-                logger.warn(f"⚠️ Failed to cache session in Redis: {str(redis_error)}")
+        # Cache session in Redis with safe operations
+        def _cache_session_operation(client, session_id, user_id):
+            session_data = {
+                'userId': user_id,
+                'sessionId': session_id,
+                'createdAt': datetime.now().isoformat()
+            }
+            client.setex(f"chat_session:{session_id}", current_config.SESSION_TIMEOUT_HOURS * 3600, json.dumps(session_data))
+            client.setex(f"last_session:{user_id}", current_config.SESSION_TIMEOUT_HOURS * 3600, session_id)
+            return True
+        
+        cache_result = safe_redis_operation(_cache_session_operation, session_id, user_id)
+        if not cache_result:
+            logger.warning(f"⚠️ Could not cache session in Redis: {session_id}")
         
         # Add to user sessions
         if user_id not in user_sessions:
@@ -1420,8 +1731,16 @@ def handle_create_new_chat(data=None):
             'isNewSession': True
         }
         
+        # Send multiple events to ensure frontend receives the update
         emit(current_config.SOCKET_EVENTS['session_status'], response, room=request.sid)
+        emit('session_initialized', response, room=request.sid)
+        emit('init_response', response, room=request.sid)
         emit('new_chat_created', response, room=request.sid)
+        
+        # Also trigger session list refresh
+        sessions = asyncio.run(chatbot.memory_manager.get_user_sessions(user_id))
+        sessions_converted = convert_dates_to_isoformat(sessions)
+        emit('user_sessions', {'sessions': sessions_converted}, room=request.sid)
         
     except Exception as e:
         logger.error(f"❌ Create new chat error: {str(e)}")

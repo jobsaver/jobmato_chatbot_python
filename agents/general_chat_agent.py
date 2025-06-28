@@ -10,6 +10,8 @@ logger = logging.getLogger(__name__)
 class GeneralChatAgent(BaseAgent):
     """Agent responsible for handling general chat conversations"""
     
+    UNREALISTIC_LOCATIONS = {"mars", "moon", "jupiter", "saturn", "venus", "pluto", "mercury", "neptune", "uranus", "andromeda", "milky way", "galaxy", "space", "sun"}
+    
     def __init__(self, memory_manager=None):
         super().__init__()
         self.llm_client = LLMClient()
@@ -208,10 +210,23 @@ Handle conversations naturally while steering toward professional development. I
                 'my career', 'my resume', 'my experience', 'my skills', 'help me',
                 'what should i', 'advice for me', 'about me', 'my background',
                 'recommend for me', 'suggest for me', 'personalized', 'tailored',
-                'mera career', 'mera resume', 'mere skills', 'meri help'
+                'mera career', 'mera resume', 'mere skills', 'meri help',
+                'resume upload', 'upload resume', 'new resume', 'updated resume',
+                'resume analysis', 'analyze resume', 'resume review', 'review resume',
+                'career advice', 'career guidance', 'career help', 'career planning'
+            ])
+            
+            # Check for direct resume upload requests
+            wants_resume_upload = any(keyword in query_lower for keyword in [
+                'upload resume', 'resume upload', 'upload my resume', 'new resume',
+                'updated resume', 'update resume', 'resume update', 'upload cv',
+                'cv upload', 'upload my cv', 'add resume', 'submit resume'
             ])
             
             if wants_personalized and (not resume_data or resume_data.get('error')):
+                return self._get_upload_prompt_response(extracted_data.get('language', 'english'))
+            
+            if wants_resume_upload:
                 return self._get_upload_prompt_response(extracted_data.get('language', 'english'))
             
             # Use job search tool if query is about jobs, market, opportunities
@@ -379,10 +394,18 @@ Handle conversations naturally while steering toward professional development. I
                 "For the best personalized guidance, I'll need your resume! 🚀 Upload it and I'll give you customized career advice.",
             ]
         
-        return self.create_response(
-            'plain_text',
-            self._get_varied_response(responses),
-            {'needs_upload': True, 'chat_type': 'personalized_help', 'language': language}
+        # Use the response formatter to create an upload prompt response
+        from utils.response_formatter import ResponseFormatter
+        formatter = ResponseFormatter()
+        
+        return formatter.format_upload_prompt_response(
+            message=self._get_varied_response(responses),
+            metadata={
+                'needs_upload': True, 
+                'chat_type': 'personalized_help', 
+                'language': language,
+                'trigger_reason': 'personalized_advice_requested'
+            }
         )
     
     def _get_varied_response(self, responses_list: list) -> str:
@@ -712,4 +735,18 @@ Kya tum technology field mein career banana chahte ho? Main guide kar sakta hoon
 
 Would you like to build a career in technology? I can guide you! 🚀"""
         
+        if self._is_unrealistic_location(query):
+            response = {
+                'hindi': "Sorry, Mars ya Moon par abhi jobs available nahi hain! 🚀 Lekin main aapko Earth par technology careers mein help kar sakta hoon. Kya interest hai aapka?",
+                'hinglish': "Sorry yaar, Mars ya Moon par jobs nahi milengi! 🚀 Lekin technology careers mein help kar sakta hoon. Kya interest hai tumhara?",
+                'english': "Sorry, I can't find jobs on Mars yet! 🚀 But I can help you with real-world technology careers. What tech or location are you interested in?"
+            }.get(language, "Sorry, I can't find jobs on Mars yet! 🚀 But I can help you with real-world technology careers. What tech or location are you interested in?")
+            return self.create_response('plain_text', response, {'chat_type': 'unrealistic_location', 'language': language})
+        
         return self.create_response('plain_text', response, {'chat_type': 'technology_question', 'language': language}) 
+
+    def _is_unrealistic_location(self, query: str) -> bool:
+        if not query:
+            return False
+        query_lower = query.strip().lower()
+        return any(loc in query_lower for loc in self.UNREALISTIC_LOCATIONS) 

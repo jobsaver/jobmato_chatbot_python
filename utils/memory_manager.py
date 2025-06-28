@@ -94,7 +94,7 @@ class MemoryManager:
             return ""
 
     async def get_conversation_context_for_agents(self, session_id: str, limit: int = 3) -> str:
-        """Get conversation context specifically formatted for agents (last 3 messages)"""
+        """Get conversation context specifically formatted for agents (last 3 messages) - optimized"""
         try:
             if self.use_mongodb and self.mongodb_manager:
                 return await self.mongodb_manager.get_conversation_context_for_agents(session_id, limit)
@@ -109,8 +109,8 @@ class MemoryManager:
                     role = msg.get('role', 'user')
                     content = msg.get('content', '')
                     # Truncate very long messages to keep context manageable
-                    if len(content) > 200:
-                        content = content[:200] + "..."
+                    if len(content) > 150:  # Reduced from 200
+                        content = content[:150] + "..."
                     formatted_history.append(f"{role.capitalize()}: {content}")
                 return "\n".join(formatted_history)
         except Exception as e:
@@ -118,9 +118,16 @@ class MemoryManager:
             return ""
 
     async def store_conversation(self, session_id: str, user_message: str, assistant_message: str, metadata: Dict[str, Any] = None, user_id: str = None, user_profile: Dict[str, Any] = None):
-        """Store a conversation exchange as a message in the chat session"""
+        """Store a conversation exchange as a message in the chat session - optimized"""
         try:
             now = datetime.utcnow()
+            
+            # Truncate messages for performance
+            if len(user_message) > 500:
+                user_message = user_message[:500] + "..."
+            if len(assistant_message) > 1000:
+                assistant_message = assistant_message[:1000] + "..."
+            
             if self.use_mongodb and self.mongodb_manager:
                 # Store as a message in the chat session's messages array
                 # Store user message
@@ -132,13 +139,7 @@ class MemoryManager:
                     'id': f"user_{now.timestamp()}",
                     'metadata': metadata or {}
                 }
-                await self.mongodb_manager.upsert_message(
-                    session_id=session_id,
-                    user_id=user_id or 'unknown',
-                    message=user_msg,
-                    user_profile=user_profile,
-                    metadata=metadata
-                )
+                
                 # Store assistant message
                 assistant_msg = {
                     'role': 'assistant',
@@ -148,10 +149,12 @@ class MemoryManager:
                     'id': f"assistant_{now.timestamp()}",
                     'metadata': metadata or {}
                 }
-                await self.mongodb_manager.upsert_message(
+                
+                # Batch store both messages
+                await self.mongodb_manager.batch_upsert_messages(
                     session_id=session_id,
                     user_id=user_id or 'unknown',
-                    message=assistant_msg,
+                    messages=[user_msg, assistant_msg],
                     user_profile=user_profile,
                     metadata=metadata
                 )
@@ -248,4 +251,17 @@ class MemoryManager:
                 }
         except Exception as e:
             logger.error(f"Error getting session info: {str(e)}")
-            return {} 
+            return {}
+
+    async def health_check(self) -> bool:
+        """Perform a health check on the memory manager"""
+        try:
+            if self.use_mongodb and self.mongodb_manager:
+                # Test MongoDB connection with a simple operation
+                return await self.mongodb_manager.health_check()
+            else:
+                # For in-memory storage, always healthy
+                return True
+        except Exception as e:
+            logger.error(f"Health check failed: {str(e)}")
+            return False 
