@@ -788,18 +788,18 @@
                     
                     // Track job search state for pagination
                     if (data.type === 'job_card' && data.metadata) {
-                        this.currentSearchQuery = data.metadata.searchQuery || '';
+                        this.currentSearchQuery = data.metadata.searchQuery || data.metadata.originalQuery || '';
                         this.hasMoreJobs = data.metadata.hasMore || false;
                         this.totalJobs = data.metadata.total || data.metadata.totalJobs || 0;
                         
                         if (data.metadata.isFollowUp) {
                             // This is a load more response
                             this.currentPage = data.metadata.currentPage || data.metadata.page || 1;
-                            console.log(`Load more response: page=${this.currentPage}, hasMore=${this.hasMoreJobs}, total=${this.totalJobs}`);
+                            console.log(`📄 Load more response: page=${this.currentPage}, hasMore=${this.hasMoreJobs}, total=${this.totalJobs}, query="${this.currentSearchQuery}"`);
                         } else {
                             // This is a new search
                             this.currentPage = 1;
-                            console.log(`New search: page=${this.currentPage}, hasMore=${this.hasMoreJobs}, total=${this.totalJobs}`);
+                            console.log(`🔍 New search: page=${this.currentPage}, hasMore=${this.hasMoreJobs}, total=${this.totalJobs}, query="${this.currentSearchQuery}"`);
                         }
                         
                         // Update load more button state
@@ -1310,12 +1310,14 @@
             }
             
             loadMoreJobs() {
+                console.log(`🔄 Load More Jobs called - hasMore: ${this.hasMoreJobs}, query: "${this.currentSearchQuery}", currentPage: ${this.currentPage}`);
+                
                 if (!this.hasMoreJobs || !this.currentSearchQuery) {
-                    console.log('No more jobs to load or no search query');
+                    console.log('❌ Cannot load more jobs - hasMoreJobs:', this.hasMoreJobs, 'currentSearchQuery:', this.currentSearchQuery);
                     return;
                 }
                 
-                console.log(`Loading more jobs for query: "${this.currentSearchQuery}", page: ${this.currentPage + 1}`);
+                console.log(`📄 Loading more jobs for query: "${this.currentSearchQuery}", page: ${this.currentPage + 1}`);
                 
                 // Disable the load more button
                 const loadMoreBtn = document.querySelector('.load-more-btn');
@@ -1325,10 +1327,12 @@
                 }
                 
                 // Send load more request
-                this.socket.emit('load_more_jobs', {
+                const loadMoreData = {
                     page: this.currentPage + 1,
                     searchQuery: this.currentSearchQuery
-                });
+                };
+                console.log('📤 Sending load_more_jobs event with data:', loadMoreData);
+                this.socket.emit('load_more_jobs', loadMoreData);
                 
                 // Set a timeout to re-enable button if no response
                 setTimeout(() => {
