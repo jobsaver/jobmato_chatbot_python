@@ -704,6 +704,27 @@ def handle_send_message(data):
         if not response.get('content'):
             raise Exception("Empty response content received from chatbot")
         
+        # Store search context in Redis for pagination if this is a job search
+        if response.get('type') == 'job_card' and response.get('metadata'):
+            metadata = response.get('metadata', {})
+            if redis_client:
+                try:
+                    # Store comprehensive search context
+                    search_context = {
+                        'original_query': message,
+                        'search_query': message,
+                        'user_message': message,
+                        'response_type': response.get('type'),
+                        'search_params': metadata.get('searchParams', {}),
+                        'last_page': metadata.get('currentPage', 1),
+                        'has_more': metadata.get('hasMore', False),
+                        'total_jobs': metadata.get('totalJobs', 0)
+                    }
+                    redis_client.setex(f"last_search_context:{session_id}", 3600, json.dumps(search_context))
+                    logger.info(f"💾 Stored search context for session {session_id}: {search_context}")
+                except Exception as e:
+                    logger.warning(f"⚠️ Failed to store search context: {str(e)}")
+
         # Store conversation in database
         try:
             asyncio.run(chatbot.memory_manager.store_conversation(
@@ -790,7 +811,11 @@ def handle_get_user_sessions():
             raise Exception("User not authenticated")
         
         sessions = asyncio.run(chatbot.memory_manager.get_user_sessions(user_id))
-        emit('user_sessions', {'sessions': sessions}, room=request.sid)
+        
+        # Convert datetime objects to ISO format for JSON serialization
+        sessions_converted = convert_dates_to_isoformat(sessions)
+        
+        emit('user_sessions', {'sessions': sessions_converted}, room=request.sid)
     except Exception as e:
         handle_error('sessions_error', e)
 
@@ -958,14 +983,23 @@ def handle_load_more_jobs(data):
             except Exception as e:
                 logger.warning(f"⚠️ Could not retrieve search context from Redis: {str(e)}")
         
-        # If no search context found, we can't do a proper follow-up search
+        # If no search context found, try to use the provided search query as fallback
         if not extracted_data:
-            emit(current_config.SOCKET_EVENTS['receive_message'], {
-                'content': 'Unable to load more jobs. Please perform a new search first.',
-                'type': 'plain_text',
-                'metadata': {'error': 'No search context'}
-            }, room=request.sid)
-            return
+            if search_query and search_query.strip():
+                logger.info(f"🔄 No stored context, using provided search query: {search_query}")
+                extracted_data = {
+                    'original_query': search_query,
+                    'query': search_query,
+                    'job_title': search_query,
+                    'skills': [search_query]
+                }
+            else:
+                emit(current_config.SOCKET_EVENTS['receive_message'], {
+                    'content': 'Unable to load more jobs. Please perform a new search first.',
+                    'type': 'plain_text',
+                    'metadata': {'error': 'No search context'}
+                }, room=request.sid)
+                return
         
         # Prepare routing data for follow-up search
         routing_data = {
@@ -1460,10 +1494,14 @@ def get_user_sessions_api():
         page = int(request.args.get('page', 1))
         limit = int(request.args.get('limit', 10))
         sessions = asyncio.run(chatbot.memory_manager.get_user_sessions(user_id, limit=1000))  # get all, paginate below
-        total = len(sessions)
+        
+        # Convert datetime objects to ISO format for JSON serialization
+        sessions_converted = convert_dates_to_isoformat(sessions)
+        
+        total = len(sessions_converted)
         start = (page - 1) * limit
         end = start + limit
-        paginated = sessions[start:end]
+        paginated = sessions_converted[start:end]
         return jsonify({
             'success': True,
             'sessions': paginated,
@@ -1542,8 +1580,16 @@ def handle_create_new_chat(data=None):
             'isNewSession': True
         }
         
+        # Send multiple events to ensure frontend receives the update
         emit(current_config.SOCKET_EVENTS['session_status'], response, room=request.sid)
+        emit('session_initialized', response, room=request.sid)
+        emit('init_response', response, room=request.sid)
         emit('new_chat_created', response, room=request.sid)
+        
+        # Also trigger session list refresh
+        sessions = asyncio.run(chatbot.memory_manager.get_user_sessions(user_id))
+        sessions_converted = convert_dates_to_isoformat(sessions)
+        emit('user_sessions', {'sessions': sessions_converted}, room=request.sid)
         
     except Exception as e:
         logger.error(f"❌ Create new chat error: {str(e)}")

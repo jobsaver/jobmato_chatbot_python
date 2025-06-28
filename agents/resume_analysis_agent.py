@@ -161,13 +161,17 @@ Respond in the user's preferred language (English/Hindi/Hinglish). Be constructi
         else:
             message = "Abhay, to provide you with detailed resume analysis, I'll need you to upload your resume first! 📄 Once uploaded, I'll give you comprehensive feedback and improvement suggestions."
         
-        return self.create_response(
-            'plain_text',
-            message,
-            {
+        # Use the response formatter to create an upload prompt response
+        from utils.response_formatter import ResponseFormatter
+        formatter = ResponseFormatter()
+        
+        return formatter.format_upload_prompt_response(
+            message=message,
+            metadata={
                 'needs_upload': True,
                 'category': 'RESUME_ANALYSIS',
-                'language': language
+                'language': language,
+                'trigger_reason': 'resume_analysis_requested'
             }
         )
     

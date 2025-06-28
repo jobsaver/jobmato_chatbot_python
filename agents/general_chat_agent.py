@@ -210,10 +210,23 @@ Handle conversations naturally while steering toward professional development. I
                 'my career', 'my resume', 'my experience', 'my skills', 'help me',
                 'what should i', 'advice for me', 'about me', 'my background',
                 'recommend for me', 'suggest for me', 'personalized', 'tailored',
-                'mera career', 'mera resume', 'mere skills', 'meri help'
+                'mera career', 'mera resume', 'mere skills', 'meri help',
+                'resume upload', 'upload resume', 'new resume', 'updated resume',
+                'resume analysis', 'analyze resume', 'resume review', 'review resume',
+                'career advice', 'career guidance', 'career help', 'career planning'
+            ])
+            
+            # Check for direct resume upload requests
+            wants_resume_upload = any(keyword in query_lower for keyword in [
+                'upload resume', 'resume upload', 'upload my resume', 'new resume',
+                'updated resume', 'update resume', 'resume update', 'upload cv',
+                'cv upload', 'upload my cv', 'add resume', 'submit resume'
             ])
             
             if wants_personalized and (not resume_data or resume_data.get('error')):
+                return self._get_upload_prompt_response(extracted_data.get('language', 'english'))
+            
+            if wants_resume_upload:
                 return self._get_upload_prompt_response(extracted_data.get('language', 'english'))
             
             # Use job search tool if query is about jobs, market, opportunities
@@ -381,10 +394,18 @@ Handle conversations naturally while steering toward professional development. I
                 "For the best personalized guidance, I'll need your resume! 🚀 Upload it and I'll give you customized career advice.",
             ]
         
-        return self.create_response(
-            'plain_text',
-            self._get_varied_response(responses),
-            {'needs_upload': True, 'chat_type': 'personalized_help', 'language': language}
+        # Use the response formatter to create an upload prompt response
+        from utils.response_formatter import ResponseFormatter
+        formatter = ResponseFormatter()
+        
+        return formatter.format_upload_prompt_response(
+            message=self._get_varied_response(responses),
+            metadata={
+                'needs_upload': True, 
+                'chat_type': 'personalized_help', 
+                'language': language,
+                'trigger_reason': 'personalized_advice_requested'
+            }
         )
     
     def _get_varied_response(self, responses_list: list) -> str:
