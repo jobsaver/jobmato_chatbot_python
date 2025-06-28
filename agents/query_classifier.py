@@ -55,6 +55,8 @@ Respond with JSON in this exact format, and NOTHING ELSE:
     // skills: string (comma-separated, e.g., "Python, JavaScript, React")
     // experience_min: number (minimum years of experience)
     // experience_max: number (maximum years of experience)
+    // salary_min: number (minimum salary in thousands, e.g., 20 for 20k, 500 for 5 lakh) - will be converted to actual rupees by job search agent
+    // salary_max: number (maximum salary in thousands, e.g., 50 for 50k, 1200 for 12 lakh) - will be converted to actual rupees by job search agent
     // work_mode: string (e.g., "on-site", "remote", "hybrid")
     // industry: string (e.g., "Technology", "Finance", "Healthcare")
     // domain: string (e.g., "AI/ML", "Cloud Computing", "E-commerce")
@@ -92,6 +94,56 @@ RESUME-BASED JOB SEARCH RULES:
    - "jobs based on my profile" → internship: false, focus on full-time positions
    - "recommend jobs for my skills" → internship: false, focus on full-time positions
 
+SALARY EXTRACTION RULES:
+1. ALWAYS extract salary information when mentioned in query
+2. Convert salary mentions to thousands format:
+   - "20000", "20k", "20 thousand" → 20
+   - "5 lakh", "500000", "5L" → 500  
+   - "10 lakh", "1000000", "10L" → 1000
+   - "15 lakh", "1500000", "15L" → 1500
+3. Handle salary ranges:
+   - "20k to 50k" → salary_min: 20, salary_max: 50
+   - "5-10 lakh" → salary_min: 500, salary_max: 1000
+   - "above 20k" → salary_min: 20
+   - "below 50k" → salary_max: 50
+   - "around 30k", "30k salary" → salary_min: 25, salary_max: 35 (±5k range)
+4. Common salary patterns:
+   - "jobs with 20000 salary" → salary_min: 20
+   - "20k+ jobs" → salary_min: 20
+   - "minimum 5 lakh" → salary_min: 500
+   - "upto 10 lakh" → salary_max: 1000
+5. Language variations:
+   - "20 हजार", "20 हज़ार" → 20
+   - "5 लाख", "paan lakh" → 500
+   - "20k se zyada" → salary_min: 20
+   - "10 lakh tak" → salary_max: 1000
+
+LOCATION EXTRACTION RULES:
+1. Extract all mentioned locations (cities, states, countries)
+2. Handle common variations:
+   - "Bangalore", "Bengaluru", "BLR" → "Bengaluru"
+   - "Delhi", "New Delhi", "NCR" → "Delhi"
+   - "Mumbai", "Bombay" → "Mumbai"
+   - "Hyderabad", "Hyd" → "Hyderabad"
+   - "Chennai", "Madras" → "Chennai"
+   - "Pune", "Poona" → "Pune"
+3. Work mode detection:
+   - "remote", "work from home", "WFH" → work_mode: "remote"
+   - "on-site", "office", "in-office" → work_mode: "on-site"
+   - "hybrid" → work_mode: "hybrid"
+
+EXPERIENCE EXTRACTION RULES:
+1. Extract experience requirements when mentioned:
+   - "2 years experience" → experience_min: 2
+   - "0-2 years" → experience_min: 0, experience_max: 2
+   - "minimum 3 years" → experience_min: 3
+   - "fresher", "0 experience" → experience_min: 0, experience_max: 0
+   - "experienced", "senior" → experience_min: 3
+2. Language variations:
+   - "2 saal experience", "do saal" → experience_min: 2
+   - "fresher jobs", "nayi job" → experience_min: 0, experience_max: 0
+   - "experienced developer" → experience_min: 3
+
 INTERNSHIP DETECTION RULES:
 1. Set internship: true ONLY for queries containing: "intern", "internship", "trainee", "graduate", "student", "summer intern", "winter intern"
 2. Set internship: true for queries like: "internship opportunities", "student jobs", "graduate positions"
@@ -108,9 +160,17 @@ INTERNSHIP DETECTION RULES:
 EXAMPLES:
 - Query: "Android jobs" → skills: "Android, Java, Kotlin, Android Studio, XML"
 - Query: "React developer positions" → skills: "React, JavaScript, TypeScript, HTML, CSS"
-- Query: "Python developer in Bangalore" → skills: "Python, Django, Flask, SQL, Git"
+- Query: "Python developer in Bangalore" → skills: "Python, Django, Flask, SQL, Git", location: "Bengaluru"
 - Query: "Data scientist roles" → skills: "Python, R, SQL, Machine Learning, Statistics"
 - Query: "DevOps engineer jobs" → skills: "Docker, Kubernetes, AWS, CI/CD, Linux"
+- Query: "jobs with 20000 salary" → salary_min: 20
+- Query: "jobs with 20,000 salary" → salary_min: 20
+- Query: "give job with 20,000 salry" → salary_min: 20
+- Query: "5 lakh salary jobs in Mumbai" → salary_min: 500, location: "Mumbai"
+- Query: "20k to 50k jobs in Delhi" → salary_min: 20, salary_max: 50, location: "Delhi"
+- Query: "minimum 3 years experience jobs" → experience_min: 3
+- Query: "fresher jobs in Bangalore" → experience_min: 0, experience_max: 0, location: "Bengaluru"
+- Query: "remote Python jobs above 10 lakh" → skills: "Python, Django, Flask, SQL, Git", work_mode: "remote", salary_min: 1000
 - Query: "Android internship" → internship: true, job_type: "internship", skills: "Android, Java, Kotlin, Android Studio, XML"
 - Query: "Summer intern positions" → internship: true, job_type: "internship"
 - Query: "Graduate trainee jobs" → internship: true, job_type: "internship"

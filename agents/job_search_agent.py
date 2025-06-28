@@ -457,6 +457,8 @@ class JobSearchAgent(BaseAgent):
             params['query'] = extracted_data['query']
         if extracted_data.get('search'):
             params['search'] = extracted_data['search']
+        if extracted_data.get('searchQuery'):
+            params['query'] = extracted_data['searchQuery']
         
         # Handle job_title or job_title_keywords
         job_title = extracted_data.get('job_title') or extracted_data.get('job_title_keywords') or extracted_data.get('keywords')
@@ -506,11 +508,19 @@ class JobSearchAgent(BaseAgent):
         if extracted_data.get('experience_max') is not None:
             params['experience_max'] = extracted_data['experience_max']
         
-        # 💰 Salary parameters
+        # 💰 Salary parameters - Convert from thousands to actual rupee amounts
         if extracted_data.get('salary_min') is not None:
-            params['salary_min'] = extracted_data['salary_min']
+            # Query classifier sends values in thousands (e.g., 20 for 20k, 500 for 5 lakh)
+            # API expects actual rupee amounts (e.g., 20000, 500000)
+            salary_min_thousands = extracted_data['salary_min']
+            params['salary_min'] = int(salary_min_thousands * 1000)
+            logger.info(f"💰 Converting salary_min: {salary_min_thousands}k → {params['salary_min']} rupees")
         if extracted_data.get('salary_max') is not None:
-            params['salary_max'] = extracted_data['salary_max']
+            # Query classifier sends values in thousands (e.g., 50 for 50k, 1000 for 10 lakh)
+            # API expects actual rupee amounts (e.g., 50000, 1000000)
+            salary_max_thousands = extracted_data['salary_max']
+            params['salary_max'] = int(salary_max_thousands * 1000)
+            logger.info(f"💰 Converting salary_max: {salary_max_thousands}k → {params['salary_max']} rupees")
         
         # 🎓 Internship filter - IMPROVED LOGIC
         # Check for internship request from multiple sources
