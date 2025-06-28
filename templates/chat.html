@@ -805,10 +805,8 @@
 
             createNewSession() {
                 console.log('🆕 Creating new session...');
-                    this.socket.emit('init_chat', {});
-                 // After creating a new session via socket, we should probably get confirmation
-                // and then refresh the session list. A slight delay might be needed.
-                setTimeout(() => this.fetchSessions(), 1000);
+                this.socket.emit('create_new_chat', {});
+                // Session list will be automatically updated via socket events
             }
 
             initializeWebSocket() {
@@ -860,13 +858,35 @@
                         this.sessionId = data.sessionId;
                         this.updateActiveSession(this.sessionId);
                         this.showSessionInfo(`Session: ${data.sessionId}`);
+                        // Refresh sessions when session status changes
+                        setTimeout(() => this.fetchSessions(), 500);
                     } else {
                         this.showAuthStatus('❌ Session initialization failed: ' + data.error, 'error');
                     }
                 });
                 
+                this.socket.on('session_initialized', (data) => {
+                    console.log('🚀 Session initialized:', data);
+                    if (data.sessionId) {
+                        this.sessionId = data.sessionId;
+                        this.updateActiveSession(this.sessionId);
+                        // Refresh sessions after initialization
+                        setTimeout(() => this.fetchSessions(), 500);
+                    }
+                });
+                
                 this.socket.on('init_response', (data) => {
                     console.log('🚀 Chat initialized:', data);
+                });
+                
+                this.socket.on('new_chat_created', (data) => {
+                    console.log('🆕 New chat created:', data);
+                    if (data.sessionId) {
+                        this.sessionId = data.sessionId;
+                        this.updateActiveSession(this.sessionId);
+                        this.clearChatMessages();
+                        // Sessions list will be updated via user_sessions event
+                    }
                 });
                 
                 // Message event handlers
@@ -1092,9 +1112,22 @@
                 
                 // Load history messages
                 if(Array.isArray(messages)) {
-                messages.forEach(msg => {
-                        this.addMessage(msg.content, msg.sender === 'user' ? 'user' : 'assistant', msg.full_response);
-                });
+                    messages.forEach(msg => {
+                        // Prepare full response object for proper rendering
+                        const fullResponse = {
+                            type: msg.type || 'plain_text',
+                            metadata: msg.metadata || {},
+                            content: msg.content
+                        };
+                        
+                        // For job card messages, ensure jobs are in metadata
+                        if (msg.type === 'job_card' && msg.metadata && msg.metadata.jobs) {
+                            fullResponse.metadata.jobs = msg.metadata.jobs;
+                        }
+                        
+                        const sender = (msg.sender === 'user' || msg.role === 'user') ? 'user' : 'assistant';
+                        this.addMessage(msg.content, sender, fullResponse);
+                    });
                 }
             }
             

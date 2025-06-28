@@ -122,10 +122,21 @@ class MemoryManager:
         try:
             now = datetime.utcnow()
             
-            # Truncate messages for performance
+            # Determine message type from metadata
+            message_type = 'plain_text'
+            if metadata:
+                # Check if this is a job search response
+                if metadata.get('jobs') or metadata.get('type') == 'job_card':
+                    message_type = 'job_card'
+                elif metadata.get('type'):
+                    message_type = metadata.get('type')
+            
+            # Truncate messages for performance, but preserve job card content
             if len(user_message) > 500:
                 user_message = user_message[:500] + "..."
-            if len(assistant_message) > 1000:
+            
+            # Don't truncate job card messages as they contain important metadata
+            if message_type != 'job_card' and len(assistant_message) > 1000:
                 assistant_message = assistant_message[:1000] + "..."
             
             if self.use_mongodb and self.mongodb_manager:
@@ -140,12 +151,12 @@ class MemoryManager:
                     'metadata': metadata or {}
                 }
                 
-                # Store assistant message
+                # Store assistant message with proper type
                 assistant_msg = {
                     'role': 'assistant',
                     'content': assistant_message,
                     'timestamp': now,
-                    'type': 'plain_text',
+                    'type': message_type,
                     'id': f"assistant_{now.timestamp()}",
                     'metadata': metadata or {}
                 }
@@ -180,7 +191,7 @@ class MemoryManager:
                     'role': 'assistant',
                     'content': assistant_message,
                     'timestamp': now.isoformat(),
-                    'type': 'plain_text',
+                    'type': message_type,
                     'id': f"assistant_{now.timestamp()}",
                     'metadata': metadata or {}
                 })

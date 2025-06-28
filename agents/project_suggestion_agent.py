@@ -102,9 +102,7 @@ Consider user's current skills, career goals, and conversation history for perso
             # Generate personalized project suggestions
             suggestions_response = await self.llm_client.generate_response(context, self.system_message)
             
-            # Store conversation in memory for progressive suggestions
-            if self.memory_manager:
-                await self.memory_manager.store_conversation(session_id, original_query, suggestions_response)
+            # Storage is handled by app.py to avoid duplication
 
             final =  self.create_response(
                 'project_suggestion',

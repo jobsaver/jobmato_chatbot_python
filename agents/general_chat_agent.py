@@ -249,9 +249,7 @@ Handle conversations naturally while steering toward professional development. I
             # Generate response using LLM
             chat_response = await self.llm_client.generate_response(context, self.system_message)
             
-            # Store conversation in memory
-            if self.memory_manager:
-                await self.memory_manager.store_conversation(session_id, original_query, chat_response)
+            # Storage is handled by app.py to avoid duplication
             
             # Track this response to avoid repetition
             self._track_response(chat_response)
