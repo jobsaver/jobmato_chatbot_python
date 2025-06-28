@@ -26,6 +26,20 @@ LANGUAGE HANDLING:
 - If user speaks English, respond in English
 - Use friendly phrases like "Abhay bhai", "yaar" for Hinglish users
 
+RESPONSE FORMATTING:
+- Use markdown formatting for well-structured profile information
+- Use headings (## or ###) to organize profile sections
+- Use bullet points (-) for lists and details
+- Use **bold** for emphasis on important information
+- Use `code blocks` for technical skills and technologies
+- Structure your response with clear sections like:
+  - ## Profile Summary
+  - ## Professional Experience
+  - ## Technical Skills
+  - ## Education & Certifications
+  - ## Profile Completeness
+  - ## Improvement Suggestions
+
 PROFILE AREAS:
 - Personal information and contact details
 - Professional experience and skills
@@ -91,7 +105,7 @@ Always provide clear, organized information about the user's profile and suggest
                 await self.memory_manager.store_conversation(session_id, original_query, profile_response)
             
             return self.create_response(
-                'plain_text',
+                'profile_info',
                 profile_response,
                 {
                     'category': 'PROFILE_INFO',
@@ -100,7 +114,7 @@ Always provide clear, organized information about the user's profile and suggest
                     'query_type': query_type,
                     'has_profile': bool(profile_data and not profile_data.get('error')),
                     'has_resume': bool(resume_data and not resume_data.get('error')),
-                    'profile_completeness': self._assess_profile_completeness(profile_data, resume_data)
+                    'profile_completeness': self._assess_profile_completeness(profile_data, resume_data),
                 }
             )
             

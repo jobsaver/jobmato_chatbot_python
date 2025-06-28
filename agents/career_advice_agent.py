@@ -27,6 +27,19 @@ class CareerAdviceAgent(BaseAgent):
         - If user speaks English, respond in English
         - Use encouraging phrases like "Abhay bhai", "yaar", "boss" for Hinglish users
 
+        RESPONSE FORMATTING:
+        - Use markdown formatting for well-structured responses
+        - Use headings (## or ###) to organize different sections
+        - Use bullet points (-) for lists and action items
+        - Use **bold** for emphasis on important points
+        - Use `code blocks` for technical skills or tools
+        - Structure your response with clear sections like:
+          - ## Current Situation Analysis
+          - ## Recommended Action Steps
+          - ## Skill Development Plan
+          - ## Market Insights
+          - ## Next Steps
+
         ADVICE AREAS:
         - Career path planning and transitions
         - Skill development recommendations

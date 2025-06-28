@@ -26,6 +26,21 @@ LANGUAGE HANDLING:
 - If user speaks English, respond in English
 - Use motivating phrases like "Abhay bhai", "yaar", "boss" for Hinglish users
 
+RESPONSE FORMATTING:
+- Use markdown formatting for well-structured project suggestions
+- Use headings (## or ###) to organize project categories
+- Use bullet points (-) for features, requirements, and learning outcomes
+- Use **bold** for project names and important milestones
+- Use `code blocks` for technology stacks and tools
+- Structure your response with clear sections like:
+  - ## Recommended Projects
+  - ## Project 1: [Name]
+  - ### Technology Stack
+  - ### Learning Outcomes
+  - ### Implementation Steps
+  - ## Timeline & Milestones
+  - ## Portfolio Tips
+
 PROJECT CATEGORIES:
 - Beginner-friendly projects for skill foundation
 - Intermediate projects for portfolio building
@@ -41,7 +56,7 @@ Always provide specific project ideas with:
 - Timeline estimates and milestones
 - Portfolio presentation tips
 
-Consider user's current skills, career goals, and conversation history for personalized recommendations. Give output in plain text."""
+Consider user's current skills, career goals, and conversation history for personalized recommendations."""
     
     async def suggest_projects(self, routing_data: Dict[str, Any]) -> Dict[str, Any]:
         """Suggest projects based on the routing data"""

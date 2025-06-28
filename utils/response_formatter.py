@@ -22,12 +22,14 @@ class ResponseFormatter:
             'plain_text': 'plain_text',
             'markdown': 'markdown', 
             'job_card': 'job_card',
-            'resume_analysis': 'resume_analysis',
-            'career_advice': 'career_advice',
-            'project_suggestion': 'project_suggestion',
-                    'resume_upload_required': 'resume_upload_required',
-        'resume_upload_success': 'resume_upload_success',
-        'upload_prompt': 'upload_prompt'
+            'resume_analysis': 'markdown',  # Use markdown for formatted resume analysis
+            'career_advice': 'markdown',   # Use markdown for formatted career advice
+            'project_suggestion': 'markdown',  # Use markdown for formatted project suggestions
+            'profile_info': 'markdown',  # Use markdown for formatted profile info
+            'readme': 'markdown',  # Map readme to markdown for consistency
+            'resume_upload_required': 'resume_upload_required',
+            'resume_upload_success': 'resume_upload_success',
+            'upload_prompt': 'upload_prompt'
         }
         
         message_type = type_mapping.get(response_type, 'plain_text')
@@ -92,7 +94,7 @@ class ResponseFormatter:
         
         return self.format_chat_response(
             content=advice,
-            response_type='career_advice',
+            response_type='markdown',
             metadata=career_metadata
         )
     
@@ -114,7 +116,7 @@ class ResponseFormatter:
         
         return self.format_chat_response(
             content=analysis,
-            response_type='resume_analysis',
+            response_type='markdown',
             metadata=resume_metadata
         )
     
@@ -136,8 +138,31 @@ class ResponseFormatter:
         
         return self.format_chat_response(
             content=suggestions,
-            response_type='project_suggestion',
+            response_type='markdown',
             metadata=project_metadata
+        )
+    
+    def format_markdown_response(self, content: str, metadata: Dict[str, Any]) -> Dict[str, Any]:
+        """Format markdown response with rich formatting for long-form content"""
+        markdown_metadata = {
+            'agent': metadata.get('agent', 'general'),
+            'intent': metadata.get('intent', 'formatted_response'),
+            'confidence': metadata.get('confidence', 0.9),
+            'contentType': 'formatted_text',
+            'supportsSections': True,
+            'supportsMarkdown': True,
+            'supportsCodeBlocks': True,
+            'supportsLists': True,
+            'supportsTables': True,
+            'originalQuery': metadata.get('originalQuery', ''),
+            'timestamp': datetime.now(timezone.utc).isoformat() + "Z",
+            **(metadata or {})
+        }
+        
+        return self.format_chat_response(
+            content=content,
+            response_type='markdown',
+            metadata=markdown_metadata
         )
     
     def format_plain_text_response(self, content: str, metadata: Dict[str, Any] = None) -> Dict[str, Any]:

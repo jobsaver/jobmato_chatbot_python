@@ -29,7 +29,7 @@ class LLMClient:
         self.cache = {}
         self.cache_size = 100  # Keep last 100 responses
 
-    async def generate_response(self, prompt: str, system_message: str = "", max_tokens:Optional[int] = 512) -> str:
+    async def generate_response(self, prompt: str, system_message: str = "", max_tokens:Optional[int] = 2048) -> str:
         """Generate a response using the language model with caching"""
         try:
             # Create cache key
