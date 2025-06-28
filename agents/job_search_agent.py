@@ -122,26 +122,43 @@ class JobSearchAgent(BaseAgent):
             response_time = job_search_result.get('response_time', 0)
             logger.info(f"⏱️ First search completed in {response_time:.2f}s")
             
-            # If no jobs found, try with broader filters
-            if not jobs:
-                logger.info("🔄 No jobs found, trying with broader filters...")
+            # If less than 10 jobs found, try with broader filters (without job_title)
+            if len(jobs) < 10:
+                logger.info(f"🔄 Found only {len(jobs)} jobs, trying with broader filters (removing job_title)...")
                 broader_params = await self._build_broader_search_params(extracted_data, search_params)
                 logger.info(f"🔍 Broader search params: {broader_params}")
                 
                 broader_result = await self.search_jobs_tool(token, base_url, **broader_params)
                 
                 if broader_result.get('success'):
-                    jobs_data = broader_result.get('data', {})
-                    jobs = jobs_data.get('jobs', [])
+                    broader_jobs_data = broader_result.get('data', {})
+                    broader_jobs = broader_jobs_data.get('jobs', [])
                     broader_response_time = broader_result.get('response_time', 0)
                     
-                    if jobs:
-                        logger.info(f"✅ Found {len(jobs)} jobs with broader filters in {broader_response_time:.2f}s")
-                        # Use broader params for the rest of the processing
+                    if broader_jobs:
+                        # Combine original jobs with broader search results, avoiding duplicates
+                        original_job_count = len(jobs)
+                        original_job_ids = {job.get('_id') or job.get('id') for job in jobs if job.get('_id') or job.get('id')}
+                        unique_broader_jobs = [
+                            job for job in broader_jobs 
+                            if (job.get('_id') or job.get('id')) not in original_job_ids
+                        ]
+                        
+                        # Combine jobs (original first, then unique broader results)
+                        combined_jobs = jobs + unique_broader_jobs[:10-len(jobs)]  # Limit to 10 total
+                        jobs = combined_jobs
+                        
+                        # Update jobs_data with combined results
+                        jobs_data['jobs'] = jobs
+                        jobs_data['total'] = max(jobs_data.get('total', 0), broader_jobs_data.get('total', 0))
+                        
+                        logger.info(f"✅ Combined {len(combined_jobs)} jobs (original: {original_job_count}, broader: {len(unique_broader_jobs)}) in {broader_response_time:.2f}s")
+                        # Use broader params for pagination to get more results
                         search_params = broader_params
                     else:
-                        logger.info(f"❌ No jobs found even with broader filters ({broader_response_time:.2f}s)")
-                        return self._handle_no_jobs_found(original_query, search_params, extracted_data.get('language', 'english'))
+                        logger.info(f"❌ No additional jobs found with broader filters ({broader_response_time:.2f}s)")
+                        if len(jobs) == 0:
+                            return self._handle_no_jobs_found(original_query, search_params, extracted_data.get('language', 'english'))
                 else:
                     # Handle broader search errors too
                     broader_error = broader_result.get('error', 'Unknown error')
@@ -507,8 +524,10 @@ class JobSearchAgent(BaseAgent):
             # Always set internship=True when user explicitly requests internships
             params['internship'] = True
             params['job_type'] = 'internship'
-            params['experience_max'] = 1  # Max 1 year for internships
-            logger.info(f"🎓 Detected internship request - setting internship=True and job_type=internship")
+            # Remove any experience parameters for internships
+            params.pop('experience_min', None)
+            params.pop('experience_max', None)
+            logger.info(f"🎓 Detected internship request - setting internship=True and removing experience filters")
         elif extracted_data.get('internship') is False:
             # User explicitly said no internships
             params['internship'] = False
@@ -663,7 +682,9 @@ class JobSearchAgent(BaseAgent):
         if any(keyword in original_query for keyword in ['intern', 'internship', 'trainee', 'graduate']):
             params['internship'] = True
             params['job_type'] = 'internship'
-            params['experience_max'] = 1  # Max 1 year for internships
+            # Remove any experience parameters for internships
+            params.pop('experience_min', None)
+            params.pop('experience_max', None)
             
             # 🎓 Clean job title if it contains internship keywords
             if params.get('job_title'):
@@ -679,13 +700,13 @@ class JobSearchAgent(BaseAgent):
         
         # Auto-detect experience level
         if any(keyword in original_query for keyword in ['junior', 'entry level', 'fresher', 'fresh graduate']):
-            params['experience_min'] = 0
-            params['experience_max'] = 2
+            params['experience_min'] = "0"
+            params['experience_max'] = "2"
         elif any(keyword in original_query for keyword in ['senior', 'lead', 'principal']):
-            params['experience_min'] = 5
+            params['experience_min'] = "5"
         elif any(keyword in original_query for keyword in ['mid level', 'intermediate']):
-            params['experience_min'] = 2
-            params['experience_max'] = 5
+            params['experience_min'] = "2"
+            params['experience_max'] = "5"
         
         # Optimize limit based on search specificity
         if len([k for k in params.keys() if params[k] and k not in ['limit', 'page']]) > 5:
@@ -935,7 +956,7 @@ class JobSearchAgent(BaseAgent):
         if is_internship:
             params['internship'] = True
             params['job_type'] = 'internship'
-            params['experience_max'] = 1
+            # Don't add experience parameters for internships
             logger.info(f"🎓 Detected internship request in fallback parsing")
             
             # Clean the query to remove internship keywords for job title extraction
@@ -997,9 +1018,9 @@ class JobSearchAgent(BaseAgent):
         # Experience level detection (only if not already an internship)
         if not is_internship:
             if 'senior' in cleaned_query:
-                params['experience_min'] = 5
+                params['experience_min'] = "5"
             elif 'junior' in cleaned_query:
-                params['experience_max'] = 2
+                params['experience_max'] = "2"
         
         # Only set general query if we have meaningful terms and no specific job title
         if not params.get('job_title') and len(cleaned_query.strip()) > 2:
@@ -1054,6 +1075,9 @@ class JobSearchAgent(BaseAgent):
                     extracted_data.get('job_type') == 'internship'):
                     search_params['internship'] = True
                     search_params['job_type'] = 'internship'
+                    # Remove experience parameters for internships
+                    search_params.pop('experience_min', None)
+                    search_params.pop('experience_max', None)
                 
                 if extracted_data.get('job_title'):
                     search_params['job_title'] = extracted_data['job_title']
@@ -1247,8 +1271,10 @@ class JobSearchAgent(BaseAgent):
             # User explicitly requested internship
             essential_params['internship'] = True
             essential_params['job_type'] = 'internship'
-            essential_params['experience_max'] = 1
-            logger.info(f"🔄 Broader search: User requested internship")
+            # Remove experience parameters for internships
+            essential_params.pop('experience_min', None)
+            essential_params.pop('experience_max', None)
+            logger.info(f"🔄 Broader search: User requested internship - removing experience filters")
         elif extracted_data.get('internship') is False:
             # User explicitly said no internships
             essential_params['internship'] = False
