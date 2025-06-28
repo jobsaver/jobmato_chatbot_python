@@ -107,7 +107,7 @@ Consider user's current skills, career goals, and conversation history for perso
                 await self.memory_manager.store_conversation(session_id, original_query, suggestions_response)
 
             final =  self.create_response(
-                'plain_text',
+                'project_suggestion',
                 suggestions_response,
                 {
                     'category': 'PROJECT_SUGGESTION',
