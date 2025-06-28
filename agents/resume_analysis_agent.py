@@ -12,16 +12,44 @@ class ResumeAnalysisAgent(BaseAgent):
     def __init__(self, memory_manager=None):
         super().__init__(memory_manager)
         self.llm_client = LLMClient()
-        self.system_message = """You are a resume analysis expert. Provide helpful feedback on resume improvement.
+        self.system_message = """You are a professional resume analysis expert with deep expertise in various fields including AI/ML, software development, and career counseling. Provide personalized, actionable advice.
 
-Focus on:
-- Structure and formatting
-- Content quality and relevance
-- Skills presentation
-- Experience descriptions
-- Education and certifications
-- ATS optimization
-- Industry-specific improvements
+RESPONSE STYLE:
+- Be conversational and supportive
+- Use markdown formatting for better structure  
+- Customize your analysis based on the SPECIFIC user query
+- Provide complete, detailed responses (don't cut off mid-sentence)
+- Be practical and actionable in suggestions
+
+ANALYSIS APPROACH:
+- First understand what the user is specifically asking about
+- Focus your analysis on their exact query (not generic structure)
+- If they ask about skills, focus on skills improvement
+- If they ask about ATS, focus on ATS optimization
+- If they ask about specific roles, tailor advice for that role
+- If they ask general questions, provide comprehensive analysis
+
+RESPONSE FORMATTING:
+- Use markdown formatting for well-structured analysis
+- Use headings (## or ###) to organize different sections
+- Use bullet points (-) for lists and recommendations
+- Use **bold** for emphasis on critical points and scores
+- Use `code blocks` for specific keywords and technical terms
+- Structure your response based on the user's specific question
+
+PERSONALIZATION:
+- Address the user by name when possible
+- Reference specific content from their resume
+- Provide role-specific advice when they mention target positions
+- Consider their experience level and career stage
+- Give practical next steps they can take immediately
+
+KEY PRINCIPLES:
+- Answer the SPECIFIC question asked, not a generic template
+- Provide complete responses without cutting off
+- Focus on the most relevant aspects based on their query
+- Be encouraging while being honest about areas for improvement
+- Include specific examples and recommendations
 
 Respond in the user's preferred language (English/Hindi/Hinglish). Be constructive and specific."""
     
@@ -123,7 +151,7 @@ Respond in the user's preferred language (English/Hindi/Hinglish). Be constructi
                 await self.memory_manager.store_conversation(session_id, original_query, analysis_response)
             
             return self.create_response(
-                'plain_text',
+                'resume_analysis',
                 analysis_response,
                 {
                     'category': 'RESUME_ANALYSIS',
@@ -551,17 +579,18 @@ No resume content was provided. Please provide general resume advice and suggest
         return context 
 
     async def _analyze_with_llm(self, user_question: str, resume_data: Dict[str, Any], profile_data: Dict[str, Any]) -> str:
-        """Analyze resume using LLM with clean text content"""
+        """Analyze resume using LLM with query-specific context and complete responses"""
         try:
-            # Build clean context using only text content
-            context = self._build_analysis_context(user_question, resume_data, profile_data)
+            # Build dynamic context based on the user's specific question
+            context = self._build_dynamic_context(user_question, resume_data, profile_data)
             
-            logger.info(f"📝 Sending clean text context to LLM (length: {len(context)} chars)")
+            logger.info(f"📝 Sending dynamic context to LLM (length: {len(context)} chars)")
             
-            # Get LLM response
+            # Get LLM response with increased max tokens for complete responses
             response = await self.llm_client.generate_response(
                 context,
-                self.system_message
+                self.system_message,
+                max_tokens=4000  # Increased for complete responses
             )
             
             logger.info(f"📝 LLM response type: {type(response)}")
@@ -573,73 +602,93 @@ No resume content was provided. Please provide general resume advice and suggest
             logger.error(f"❌ Error in LLM analysis: {str(e)}")
             return self._create_fallback_analysis(user_question, resume_data)
 
-    async def _analyze_skills(self, user_question: str, resume_data: Dict[str, Any], profile_data: Dict[str, Any]) -> str:
-        """Analyze skills section with clean text content"""
-        try:
-            context = self._build_analysis_context(user_question, resume_data, profile_data)
-            context += "\n\nFocus specifically on skills analysis and recommendations."
-            
-            response = await self.llm_client.generate_response(
-                context,
-                "You are a career advisor. Analyze the skills in the resume and provide specific recommendations for improvement."
-            )
-            
-            return response
-            
-        except Exception as e:
-            logger.error(f"❌ Error in skills analysis: {str(e)}")
-            return "I can help you analyze your skills! Please share your resume or tell me about your current skills, and I'll provide specific recommendations for improvement."
+    def _build_dynamic_context(self, user_question: str, resume_data: Dict[str, Any], profile_data: Dict[str, Any]) -> str:
+        """Build context that adapts to the specific user question"""
+        
+        # Extract resume text content
+        resume_text = ""
+        if resume_data and isinstance(resume_data, dict):
+            data = resume_data.get('data', {})
+            if isinstance(data, dict):
+                # Try different paths for resume text
+                if data.get('resume') and isinstance(data['resume'], dict):
+                    resume_text = data['resume'].get('text_content', '')
+                    logger.info(f"📄 Found text_content in data.resume.text_content: {len(resume_text)} chars")
+                
+                if not resume_text:
+                    resume_text = data.get('text_content', '')
+                    logger.info(f"📄 Found text_content in data.text_content: {len(resume_text)} chars")
+                
+                if not resume_text:
+                    resume_text = data.get('content', '')
+                    logger.info(f"📄 Found content in data.content: {len(resume_text)} chars")
+                
+                if resume_text:
+                    # Clean up text and ensure reasonable length
+                    resume_text = ' '.join(resume_text.split())
+                    if len(resume_text) > 12000:  # Increased limit for better analysis
+                        resume_text = resume_text[:12000] + "..."
+                    logger.info(f"📄 Final cleaned resume text: {len(resume_text)} chars")
 
-    async def _analyze_experience(self, user_question: str, resume_data: Dict[str, Any], profile_data: Dict[str, Any]) -> str:
-        """Analyze experience section with clean text content"""
-        try:
-            context = self._build_analysis_context(user_question, resume_data, profile_data)
-            context += "\n\nFocus specifically on work experience analysis and recommendations."
-            
-            response = await self.llm_client.generate_response(
-                context,
-                "You are a career advisor. Analyze the work experience in the resume and provide specific recommendations for improvement."
-            )
-            
-            return response
-            
-        except Exception as e:
-            logger.error(f"❌ Error in experience analysis: {str(e)}")
-            return "I can help you improve your experience section! Please share your resume or tell me about your work experience, and I'll provide specific recommendations."
+        # Analyze the user's specific question to customize the response
+        query_lower = user_question.lower()
+        analysis_focus = self._determine_analysis_focus(query_lower)
+        
+        # Build context with specific focus
+        context = f"""SPECIFIC USER QUESTION: "{user_question}"
 
-    async def _analyze_formatting(self, user_question: str, resume_data: Dict[str, Any], profile_data: Dict[str, Any]) -> str:
-        """Analyze formatting and structure with clean text content"""
-        try:
-            context = self._build_analysis_context(user_question, resume_data, profile_data)
-            context += "\n\nNote: Since this is parsed text content, focus on content structure and organization rather than visual formatting."
-            
-            response = await self.llm_client.generate_response(
-                context,
-                "You are a career advisor. Analyze the structure and organization of the resume content and provide recommendations for better content flow and sections."
-            )
-            
-            return response
-            
-        except Exception as e:
-            logger.error(f"❌ Error in formatting analysis: {str(e)}")
-            return "I can help you improve your resume structure! Please share your resume and I'll provide recommendations for better organization and content flow."
+ANALYSIS FOCUS: {analysis_focus}
 
-    async def _analyze_projects(self, user_question: str, resume_data: Dict[str, Any], profile_data: Dict[str, Any]) -> str:
-        """Analyze projects section with clean text content"""
-        try:
-            context = self._build_analysis_context(user_question, resume_data, profile_data)
-            context += "\n\nFocus specifically on projects analysis and recommendations."
-            
-            response = await self.llm_client.generate_response(
-                context,
-                "You are a career advisor. Analyze the projects in the resume and provide specific recommendations for improvement."
-            )
-            
-            return response
-            
-        except Exception as e:
-            logger.error(f"❌ Error in projects analysis: {str(e)}")
-            return "I can help you improve your projects section! Please share your resume or tell me about your projects, and I'll provide specific recommendations."
+USER'S RESUME CONTENT:
+{resume_text}
+
+INSTRUCTIONS:
+1. Answer the user's SPECIFIC question - don't provide a generic analysis
+2. Focus on the "{analysis_focus}" aspect they're asking about
+3. Provide COMPLETE responses - don't cut off mid-sentence
+4. Be specific and reference actual content from their resume
+5. Give actionable next steps for their specific concern
+6. Use markdown formatting for better structure
+
+Based on their specific question about "{analysis_focus}", provide targeted, complete advice."""
+
+        logger.info(f"📝 Built dynamic context with {len(context)} total characters, focus: {analysis_focus}")
+        return context
+
+    def _determine_analysis_focus(self, query_lower: str) -> str:
+        """Determine what specific aspect the user is asking about"""
+        
+        # Specific skill/role focus
+        if any(term in query_lower for term in ['ai developer', 'ai engineer', 'machine learning', 'ml engineer']):
+            return "AI/ML role optimization"
+        elif any(term in query_lower for term in ['software developer', 'software engineer', 'backend', 'frontend']):
+            return "software development role optimization"
+        elif any(term in query_lower for term in ['data scientist', 'data analyst', 'data engineer']):
+            return "data science role optimization"
+        
+        # Analysis type focus
+        elif any(term in query_lower for term in ['ats', 'applicant tracking', 'keywords', 'parsing']):
+            return "ATS optimization and keyword analysis"
+        elif any(term in query_lower for term in ['skills', 'technical skills', 'programming']):
+            return "skills section improvement"
+        elif any(term in query_lower for term in ['experience', 'work history', 'job descriptions']):
+            return "experience section enhancement"
+        elif any(term in query_lower for term in ['projects', 'project section']):
+            return "projects section improvement"
+        elif any(term in query_lower for term in ['format', 'structure', 'layout', 'design']):
+            return "resume formatting and structure"
+        elif any(term in query_lower for term in ['achievements', 'accomplishments', 'metrics']):
+            return "quantifying achievements and impact"
+        elif any(term in query_lower for term in ['incomplete', 'cut off', 'complete']):
+            return "complete comprehensive analysis"
+        elif any(term in query_lower for term in ['improve', 'better', 'enhance', 'suggestions']):
+            return "general improvement recommendations"
+        elif any(term in query_lower for term in ['summary', 'objective', 'profile']):
+            return "professional summary optimization"
+        
+        # Default comprehensive analysis
+        else:
+            return "comprehensive resume analysis"
 
     def _create_fallback_analysis(self, user_question: str, resume_data: Dict[str, Any]) -> str:
         """Create a simple fallback analysis when LLM fails"""
