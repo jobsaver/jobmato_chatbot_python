@@ -40,52 +40,95 @@ CORS(app, origins=["http://localhost:5173", "http://127.0.0.1:5173", "http://loc
 # Get configuration
 current_config = config[os.environ.get('FLASK_ENV', 'development')]
 
-# Initialize SocketIO with enhanced configuration
+# Initialize SocketIO with enhanced configuration and error handling
 socketio = SocketIO(
     app, 
     cors_allowed_origins="*", 
     async_mode='threading',
     connect_timeout=current_config.SOCKETIO_CONNECT_TIMEOUT,
-    transports=['websocket', 'polling']
+    ping_timeout=60,
+    ping_interval=25,
+    transports=['websocket', 'polling'],
+    logger=False,  # Disable socketio logger to reduce noise
+    engineio_logger=False,
+    always_connect=True,
+    # Add error handling options
+    allow_upgrades=True,
+    compression=True
 )
 
 # Redis connection for session management
 redis_client = None
-try:
-    redis_url = current_config.REDIS_URL
-    redis_ssl = current_config.REDIS_SSL
-    redis_password = current_config.REDIS_PASSWORD
+redis_connection_attempts = 0
+MAX_REDIS_RETRY_ATTEMPTS = 3
+
+def get_redis_client():
+    """Get Redis client with retry mechanism"""
+    global redis_client, redis_connection_attempts
     
-    # For Redis with password authentication
-    if redis_password and redis_password != 'None':
-        redis_client = redis.from_url(
-            redis_url,
-            password=redis_password,
-            decode_responses=True,
-            socket_connect_timeout=5,
-            socket_timeout=5,
-            retry_on_timeout=False,
-            health_check_interval=0  # Disable health check to avoid recursion
-        )
-    else:
-        # For local Redis or non-SSL connections without password
-        redis_client = redis.from_url(
-            redis_url,
-            decode_responses=True,
-            socket_connect_timeout=5,
-            socket_timeout=5,
-            retry_on_timeout=False,
-            health_check_interval=0  # Disable health check to avoid recursion
-        )
+    if redis_client is None and redis_connection_attempts < MAX_REDIS_RETRY_ATTEMPTS:
+        try:
+            redis_connection_attempts += 1
+            redis_url = current_config.REDIS_URL
+            redis_ssl = current_config.REDIS_SSL
+            redis_password = current_config.REDIS_PASSWORD
+            
+            # For Redis with password authentication
+            if redis_password and redis_password != 'None':
+                redis_client = redis.from_url(
+                    redis_url,
+                    password=redis_password,
+                    decode_responses=True,
+                    socket_connect_timeout=3,
+                    socket_timeout=3,
+                    retry_on_timeout=False,
+                    health_check_interval=0
+                )
+            else:
+                # For local Redis or non-SSL connections without password
+                redis_client = redis.from_url(
+                    redis_url,
+                    decode_responses=True,
+                    socket_connect_timeout=3,
+                    socket_timeout=3,
+                    retry_on_timeout=False,
+                    health_check_interval=0
+                )
+            
+            # Test the connection
+            redis_client.ping()
+            logger.info("✅ Redis connected successfully")
+            redis_connection_attempts = 0  # Reset on success
+            
+        except Exception as e:
+            logger.warning(f"⚠️ Redis connection attempt {redis_connection_attempts} failed: {str(e)}")
+            redis_client = None
+            if redis_connection_attempts >= MAX_REDIS_RETRY_ATTEMPTS:
+                logger.error("❌ Redis connection failed after maximum attempts. Using in-memory storage.")
     
-    # Test the connection
-    redis_client.ping()
-    logger.info("✅ Redis connected successfully")
-    
-except Exception as e:
-    logger.warning(f"⚠️ Redis not available: {str(e)}")
-    logger.info("🔄 Falling back to in-memory session storage")
-    redis_client = None
+    return redis_client
+
+def safe_redis_operation(operation, *args, **kwargs):
+    """Safely execute Redis operations with error handling"""
+    try:
+        client = get_redis_client()
+        if client is None:
+            return None
+        return operation(client, *args, **kwargs)
+    except redis.ConnectionError as e:
+        logger.warning(f"⚠️ Redis connection error: {str(e)}")
+        global redis_client
+        redis_client = None  # Reset client to trigger reconnection
+        return None
+    except redis.TimeoutError as e:
+        logger.warning(f"⚠️ Redis timeout error: {str(e)}")
+        return None
+    except Exception as e:
+        logger.error(f"❌ Redis operation error: {str(e)}")
+        return None
+
+# Initialize Redis with retry mechanism
+get_redis_client()
 
 # Global session tracking
 connected_users = {}  # socket_id -> user_id
@@ -129,25 +172,34 @@ def get_user_data():
     return user_data_store.get(request.sid, {})
 
 def store_user_session(user_id: str, socket_id: str):
-    if not redis_client:
-        return
-    try:
-        redis_client.hset(f"user_sessions:{user_id}", "socketId", socket_id)
-        redis_client.hset(f"user_sessions:{user_id}", "connectedAt", datetime.now().isoformat())
-        redis_client.expire(f"user_sessions:{user_id}", current_config.SESSION_TIMEOUT_HOURS * 3600)
-        redis_client.set(f"socket_user:{socket_id}", user_id, current_config.SESSION_TIMEOUT_HOURS * 3600)
+    """Store user session with safe Redis operations"""
+    def _store_operation(client, user_id, socket_id):
+        client.hset(f"user_sessions:{user_id}", "socketId", socket_id)
+        client.hset(f"user_sessions:{user_id}", "connectedAt", datetime.now().isoformat())
+        client.expire(f"user_sessions:{user_id}", current_config.SESSION_TIMEOUT_HOURS * 3600)
+        client.set(f"socket_user:{socket_id}", user_id, current_config.SESSION_TIMEOUT_HOURS * 3600)
+        return True
+    
+    result = safe_redis_operation(_store_operation, user_id, socket_id)
+    if result:
         logger.info(f"💾 Stored user session in Redis: {user_id} -> {socket_id}")
-    except Exception as e:
-        logger.error(f"❌ Failed to store user session in Redis: {str(e)}")
+    else:
+        logger.warning(f"⚠️ Could not store user session in Redis, using in-memory fallback")
+        # Fallback to in-memory storage
+        connected_users[socket_id] = user_id
 
 def get_user_session_from_redis(user_id: str) -> Optional[str]:
-    if not redis_client:
-        return None
-    try:
-        return redis_client.hget(f"user_sessions:{user_id}", "socketId")
-    except Exception as e:
-        logger.error(f"❌ Failed to get user session from Redis: {str(e)}")
-        return None
+    """Get user session with safe Redis operations"""
+    def _get_operation(client, user_id):
+        return client.hget(f"user_sessions:{user_id}", "socketId")
+    
+    result = safe_redis_operation(_get_operation, user_id)
+    if result is None:
+        # Fallback to in-memory lookup
+        for socket_id, stored_user_id in connected_users.items():
+            if stored_user_id == user_id:
+                return socket_id
+    return result
 
 def broadcast_to_user(user_id: str, event: str, data: dict):
     try:
@@ -170,21 +222,50 @@ def broadcast_typing_status(user_id: str, is_typing: bool):
         logger.error(f"❌ Error broadcasting typing status: {str(e)}")
 
 def handle_error(error_type: str, error: Exception, session_id: str = None):
+    """Enhanced error handler with better logging and user feedback"""
     logger.error(f"❌ {error_type}: {str(error)}")
     error_message = str(error) if isinstance(error, Exception) else "An error occurred"
     error_code = current_config.ERROR_CODES.get(error_type.upper(), error_type.upper())
-    emit(current_config.SOCKET_EVENTS['error'], {
-        'type': error_type,
-        'code': error_code,
-        'message': error_message,
-        'sessionId': session_id,
-        'timestamp': datetime.now().isoformat()
-    }, room=request.sid)
-    emit(error_type, {
+    
+    try:
+        emit(current_config.SOCKET_EVENTS['error'], {
+            'type': error_type,
+            'code': error_code,
+            'message': error_message,
+            'sessionId': session_id,
+            'timestamp': datetime.now().isoformat()
+        }, room=request.sid)
+        
+        emit(error_type, {
+            'error': True,
+            'message': error_message,
+            'code': error_code
+        }, room=request.sid)
+    except Exception as emit_error:
+        logger.error(f"❌ Failed to emit error message: {str(emit_error)}")
+
+@socketio.on_error_default
+def default_error_handler(e):
+    """Global error handler for Socket.IO"""
+    logger.error(f"❌ Socket.IO error: {str(e)}")
+    try:
+        emit('error', {
+            'message': 'An unexpected error occurred. Please try again.',
+            'code': 'SOCKET_ERROR',
+            'timestamp': datetime.now().isoformat()
+        })
+    except Exception as emit_error:
+        logger.error(f"❌ Failed to emit error in global handler: {str(emit_error)}")
+
+@app.errorhandler(Exception)
+def handle_app_error(error):
+    """Global Flask error handler"""
+    logger.error(f"❌ Flask application error: {str(error)}")
+    return jsonify({
         'error': True,
-        'message': error_message,
-        'code': error_code
-    }, room=request.sid)
+        'message': 'An internal server error occurred',
+        'code': 'INTERNAL_ERROR'
+    }), 500
 
 class JobMatoChatBot:
     def __init__(self):
@@ -494,19 +575,48 @@ def disconnect_unauthorized():
 
 @socketio.on(current_config.SOCKET_EVENTS['disconnect'])
 def handle_disconnect():
-    user_id = get_user_id()
-    session_id = active_sessions.get(request.sid)
-    logger.info(f"👋 Client disconnected: {request.sid}")
-    if user_id and redis_client:
+    """Handle client disconnection with comprehensive cleanup"""
+    try:
+        user_id = get_user_id()
+        session_id = active_sessions.get(request.sid)
+        logger.info(f"👋 Client disconnected: {request.sid}")
+        
+        # Clean up Redis session data with safe operations
+        if user_id:
+            def _cleanup_operation(client, user_id, socket_id):
+                client.hdel(f"user_sessions:{user_id}", "socketId")
+                client.delete(f"socket_user:{socket_id}")
+                return True
+            
+            result = safe_redis_operation(_cleanup_operation, user_id, request.sid)
+            if result:
+                logger.info(f"🧹 Cleaned up Redis session data for user: {user_id}")
+            else:
+                logger.warning(f"⚠️ Could not clean up Redis data for user: {user_id}")
+        
+        # Clean up in-memory data
+        connected_users.pop(request.sid, None)
+        active_sessions.pop(request.sid, None)
+        user_data_store.pop(request.sid, None)
+        
+        # Leave any rooms
+        if user_id:
+            try:
+                leave_room(user_id)
+            except Exception as e:
+                logger.warning(f"⚠️ Error leaving room {user_id}: {str(e)}")
+        
+        logger.info(f"✅ Cleanup completed for socket: {request.sid}")
+        
+    except Exception as e:
+        logger.error(f"❌ Error during disconnect cleanup: {str(e)}")
+        # Ensure basic cleanup even if there are errors
         try:
-            redis_client.hdel(f"user_sessions:{user_id}", "socketId")
-            redis_client.delete(f"socket_user:{request.sid}")
-            logger.info(f"🧹 Cleaned up Redis session data for user: {user_id}")
-        except Exception as e:
-            logger.error(f"❌ Failed to clean up Redis session data: {str(e)}")
-    connected_users.pop(request.sid, None)
-    active_sessions.pop(request.sid, None)
-    user_data_store.pop(request.sid, None)  # Clean up user data
+            connected_users.pop(request.sid, None)
+            active_sessions.pop(request.sid, None)
+            user_data_store.pop(request.sid, None)
+        except Exception as cleanup_error:
+            logger.error(f"❌ Critical error during basic cleanup: {str(cleanup_error)}")
 
 @socketio.on(current_config.SOCKET_EVENTS['init_chat'])
 def handle_init_chat(data=None):
@@ -725,18 +835,32 @@ def handle_send_message(data):
                 except Exception as e:
                     logger.warning(f"⚠️ Failed to store search context: {str(e)}")
 
-        # Store conversation in database
-        try:
-            asyncio.run(chatbot.memory_manager.store_conversation(
-                session_id=session_id,
-                user_message=message,
-                assistant_message=response.get('content', ''),
-                metadata=response.get('metadata', {}),
-                user_id=user_id
-            ))
-            logger.info(f"💾 Conversation stored for session {session_id}")
-        except Exception as e:
-            logger.error(f"❌ Failed to store conversation: {str(e)}")
+        # Store conversation in database with retry mechanism
+        max_db_retries = 3
+        db_retry_count = 0
+        conversation_stored = False
+        
+        while db_retry_count < max_db_retries and not conversation_stored:
+            try:
+                asyncio.run(chatbot.memory_manager.store_conversation(
+                    session_id=session_id,
+                    user_message=message,
+                    assistant_message=response.get('content', ''),
+                    metadata=response.get('metadata', {}),
+                    user_id=user_id
+                ))
+                logger.info(f"💾 Conversation stored for session {session_id}")
+                conversation_stored = True
+            except Exception as e:
+                db_retry_count += 1
+                logger.warning(f"⚠️ Database store attempt {db_retry_count} failed: {str(e)}")
+                if db_retry_count >= max_db_retries:
+                    logger.error(f"❌ Failed to store conversation after {max_db_retries} attempts: {str(e)}")
+                    # Continue processing even if storage fails
+                else:
+                    # Wait a bit before retrying
+                    import time
+                    time.sleep(0.5)
         
         # Cache response for potential replay
         if redis_client:
@@ -946,12 +1070,37 @@ def handle_update_session_title(data):
 
 @socketio.on(current_config.SOCKET_EVENTS['ping'])
 def handle_ping():
-    """Connection health check"""
+    """Enhanced connection health check with system status"""
     try:
-        emit(current_config.SOCKET_EVENTS['pong'], room=request.sid)
-        logger.debug(f"🏓 Ping-pong with client: {request.sid}")
+        # Check Redis connection status
+        redis_status = "connected" if get_redis_client() is not None else "disconnected"
+        
+        # Check database connection status
+        db_status = "unknown"
+        try:
+            # Quick database health check
+            asyncio.run(chatbot.memory_manager.health_check())
+            db_status = "connected"
+        except Exception:
+            db_status = "disconnected"
+        
+        emit(current_config.SOCKET_EVENTS['pong'], {
+            'timestamp': datetime.now().isoformat(),
+            'redis_status': redis_status,
+            'db_status': db_status,
+            'server_status': 'healthy'
+        }, room=request.sid)
+        
+        logger.debug(f"🏓 Ping-pong with client: {request.sid} (Redis: {redis_status}, DB: {db_status})")
     except Exception as e:
         logger.error(f"❌ Error handling ping: {str(e)}")
+        try:
+            emit('error', {
+                'message': 'Health check failed',
+                'code': 'HEALTH_CHECK_ERROR'
+            }, room=request.sid)
+        except Exception:
+            pass  # Fail silently if we can't even emit errors
 
 @socketio.on('load_more_jobs')
 def handle_load_more_jobs(data):
@@ -1547,18 +1696,20 @@ def handle_create_new_chat(data=None):
         # Create new session
         session_id = f"session_{user_id}_{int(datetime.now().timestamp())}"
         
-        # Cache session in Redis
-        if redis_client:
-            try:
-                session_data = {
-                    'userId': user_id,
-                    'sessionId': session_id,
-                    'createdAt': datetime.now().isoformat()
-                }
-                redis_client.setex(f"chat_session:{session_id}", current_config.SESSION_TIMEOUT_HOURS * 3600, json.dumps(session_data))
-                redis_client.setex(f"last_session:{user_id}", current_config.SESSION_TIMEOUT_HOURS * 3600, session_id)
-            except Exception as redis_error:
-                logger.warn(f"⚠️ Failed to cache session in Redis: {str(redis_error)}")
+        # Cache session in Redis with safe operations
+        def _cache_session_operation(client, session_id, user_id):
+            session_data = {
+                'userId': user_id,
+                'sessionId': session_id,
+                'createdAt': datetime.now().isoformat()
+            }
+            client.setex(f"chat_session:{session_id}", current_config.SESSION_TIMEOUT_HOURS * 3600, json.dumps(session_data))
+            client.setex(f"last_session:{user_id}", current_config.SESSION_TIMEOUT_HOURS * 3600, session_id)
+            return True
+        
+        cache_result = safe_redis_operation(_cache_session_operation, session_id, user_id)
+        if not cache_result:
+            logger.warning(f"⚠️ Could not cache session in Redis: {session_id}")
         
         # Add to user sessions
         if user_id not in user_sessions:

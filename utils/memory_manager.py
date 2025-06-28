@@ -251,4 +251,17 @@ class MemoryManager:
                 }
         except Exception as e:
             logger.error(f"Error getting session info: {str(e)}")
-            return {} 
+            return {}
+
+    async def health_check(self) -> bool:
+        """Perform a health check on the memory manager"""
+        try:
+            if self.use_mongodb and self.mongodb_manager:
+                # Test MongoDB connection with a simple operation
+                return await self.mongodb_manager.health_check()
+            else:
+                # For in-memory storage, always healthy
+                return True
+        except Exception as e:
+            logger.error(f"Health check failed: {str(e)}")
+            return False 

@@ -395,6 +395,22 @@ class MongoDBManager:
             logger.error(f"❌ Error searching messages: {str(e)}")
             return []
     
+    async def health_check(self) -> bool:
+        """Perform a health check on MongoDB connection"""
+        try:
+            if not self.connected:
+                self._connect()
+            
+            if self.connected and self.client:
+                # Simple ping to test connection
+                self.client.admin.command('ping')
+                return True
+            return False
+        except Exception as e:
+            logger.error(f"MongoDB health check failed: {str(e)}")
+            self.connected = False
+            return False
+
     def close_connection(self):
         """Close MongoDB connection"""
         if self.client:
