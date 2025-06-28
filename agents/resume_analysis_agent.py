@@ -122,8 +122,8 @@ Respond in the user's preferred language (English/Hindi/Hinglish). Be constructi
                     original_query, 
                     resume_data, 
                     profile_data, 
-                    language=extracted_data.get('language', 'english')
-                )
+                language=extracted_data.get('language', 'english')
+            )
                 analysis_response = fallback_response
             elif isinstance(analysis_response, dict) and analysis_response.get('error'):
                 logger.warning(f"⚠️ LLM response has error, using fallback: {analysis_response}")
@@ -146,9 +146,7 @@ Respond in the user's preferred language (English/Hindi/Hinglish). Be constructi
             else:
                 logger.info(f"✅ LLM response successful: {len(str(analysis_response))} characters")
             
-            # Store conversation in memory for follow-up
-            if self.memory_manager:
-                await self.memory_manager.store_conversation(session_id, original_query, analysis_response)
+            # Storage is handled by app.py to avoid duplication
             
             return self.create_response(
                 'resume_analysis',

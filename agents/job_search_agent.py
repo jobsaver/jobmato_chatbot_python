@@ -200,6 +200,10 @@ class JobSearchAgent(BaseAgent):
                 formatted_job = self.format_job_for_response(job)
                 formatted_jobs.append(formatted_job)
             
+            # Get total available jobs from API response first
+            total_available = jobs_data.get('total', len(formatted_jobs))
+            has_more = total_available > 10
+            
             # Create dynamic 2-line message based on results
             total_jobs = len(formatted_jobs)
             search_query = routing_data.get('searchQuery') or routing_data.get('originalQuery', 'default search')
@@ -208,14 +212,6 @@ class JobSearchAgent(BaseAgent):
                 content = f"Here's a job opportunity that matches your search for '{search_query}':"
             else:
                 content = f"Here are {total_jobs} job opportunities that might interest you:"
-            
-            # Store conversation in memory (without raw job data)
-            if self.memory_manager:
-                await self.memory_manager.store_conversation(session_id, original_query, f"Found {total_jobs} jobs matching the search criteria")
-
-            # Get total available jobs from API response
-            total_available = jobs_data.get('total', total_jobs)
-            has_more = total_available > 10  # Show load more if more than 10 jobs available
 
             # Store search context for follow-up searches
             search_context = {
@@ -232,20 +228,9 @@ class JobSearchAgent(BaseAgent):
                 'current_page': 1
             }
             
-            # Store in memory manager for session persistence
-            if self.memory_manager:
-                try:
-                    # Store search context for this session
-                    session_id = routing_data.get('sessionId', 'default')
-                    # We'll store this in the memory manager's session data
-                    await self.memory_manager.store_conversation(
-                        session_id, 
-                        f"Search context: {original_query}", 
-                        f"Search params: {json.dumps(search_context)}",
-                        {'search_context': search_context}
-                    )
-                except Exception as e:
-                    logger.warning(f"⚠️ Could not store search context: {str(e)}")
+            # Storage is handled by app.py to avoid duplication
+            
+            # Storage is handled by app.py to avoid duplication
             
             # Store current page in Redis for pagination tracking
             try:
@@ -1161,24 +1146,7 @@ class JobSearchAgent(BaseAgent):
             else:
                 message = f"Here are the final {len(formatted_jobs)} job opportunities:\n\n📋 Job Opportunities\nFinal page {page} of {total_pages} (Jobs {((page-1) * jobs_per_page) + 1}-{total_jobs} of {total_jobs})"
             
-            # Store in memory
-            if self.memory_manager:
-                try:
-                    await self.memory_manager.store_conversation(
-                        session_id=routing_data.get('sessionId', 'default'),
-                        user_message=f"Load more jobs request - Page {page}",
-                        assistant_message=message,
-                        metadata={
-                            'type': 'job_card',
-                            'jobs_count': len(formatted_jobs),
-                            'page': page,
-                            'total_pages': total_pages,
-                            'has_more': has_more,
-                            'search_context': extracted_data
-                        }
-                    )
-                except Exception as e:
-                    logger.warning(f"⚠️ Could not store follow-up search in memory: {str(e)}")
+            # Storage is handled by app.py to avoid duplication
             
             return self.response_formatter.format_job_response(
                 jobs=formatted_jobs,

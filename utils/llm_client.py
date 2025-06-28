@@ -48,7 +48,7 @@ class LLMClient:
                 top_k=40
             )
             
-          
+            
             full_prompt = f"{system_message}\n\nUser: {prompt}\n\nAssistant:"
             
             # Generate response

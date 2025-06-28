@@ -661,6 +661,18 @@ def handle_init_chat(data=None):
                 except Exception as redis_error:
                     logger.warn(f"⚠️ Failed to cache session in Redis: {str(redis_error)}")
             
+            # Create the session in MongoDB immediately
+            try:
+                asyncio.run(chatbot.memory_manager.mongodb_manager.create_session(
+                    session_id=session_id,
+                    user_id=user_id,
+                    title='New Chat'
+                ))
+                logger.info(f"💾 Session {session_id} created in MongoDB")
+            except Exception as db_error:
+                logger.error(f"❌ Failed to create session in MongoDB: {str(db_error)}")
+                # Continue anyway, as session will be created when first message is sent
+            
             # Add to user sessions
             if user_id not in user_sessions:
                 user_sessions[user_id] = set()
@@ -683,6 +695,16 @@ def handle_init_chat(data=None):
         # Support both callback and event-based responses
         emit('session_initialized', response, room=request.sid)
         emit('init_response', response, room=request.sid)
+        emit(current_config.SOCKET_EVENTS['session_status'], response, room=request.sid)
+        
+        # Also refresh session list for the user
+        try:
+            sessions = asyncio.run(chatbot.memory_manager.get_user_sessions(user_id))
+            sessions_converted = convert_dates_to_isoformat(sessions)
+            emit('user_sessions', {'sessions': sessions_converted}, room=request.sid)
+            logger.info(f"📋 Sent {len(sessions_converted)} sessions to user {user_id}")
+        except Exception as sessions_error:
+            logger.error(f"❌ Failed to get/send sessions: {str(sessions_error)}")
         
         # Return response for acknowledgment callback
         return response
@@ -691,14 +713,12 @@ def handle_init_chat(data=None):
         logger.error(f"❌ Init chat error: {str(e)}")
         error_response = {
             'connected': False,
-            'error': str(e) if isinstance(e, Exception) else "Failed to initialize chat",
+            'error': str(e) if isinstance(e, Exception) else "Authentication or session initialization failed",
             'timestamp': datetime.now().isoformat()
         }
         
-        emit('session_initialized', error_response, room=request.sid)
+        emit(current_config.SOCKET_EVENTS['session_status'], error_response, room=request.sid)
         handle_error('init_error', e)
-        
-        # Return error for acknowledgment callback
         return error_response
 
 @socketio.on(current_config.SOCKET_EVENTS['send_message'])
@@ -842,15 +862,29 @@ def handle_send_message(data):
         
         while db_retry_count < max_db_retries and not conversation_stored:
             try:
+                # Include the response type in metadata for proper storage
+                storage_metadata = response.get('metadata', {}).copy()
+                storage_metadata['type'] = response.get('type', 'plain_text')
+                
                 asyncio.run(chatbot.memory_manager.store_conversation(
                     session_id=session_id,
                     user_message=message,
                     assistant_message=response.get('content', ''),
-                    metadata=response.get('metadata', {}),
+                    metadata=storage_metadata,
                     user_id=user_id
                 ))
                 logger.info(f"💾 Conversation stored for session {session_id}")
                 conversation_stored = True
+                
+                # Update session list after storing conversation (for message count)
+                try:
+                    sessions = asyncio.run(chatbot.memory_manager.get_user_sessions(user_id))
+                    sessions_converted = convert_dates_to_isoformat(sessions)
+                    emit('user_sessions', {'sessions': sessions_converted}, room=user_id)
+                    logger.debug(f"📋 Updated session list after message save")
+                except Exception as sessions_error:
+                    logger.warning(f"⚠️ Failed to update session list: {str(sessions_error)}")
+                    
             except Exception as e:
                 db_retry_count += 1
                 logger.warning(f"⚠️ Database store attempt {db_retry_count} failed: {str(e)}")
@@ -1711,6 +1745,18 @@ def handle_create_new_chat(data=None):
         if not cache_result:
             logger.warning(f"⚠️ Could not cache session in Redis: {session_id}")
         
+        # Create the session in MongoDB immediately
+        try:
+            asyncio.run(chatbot.memory_manager.mongodb_manager.create_session(
+                session_id=session_id,
+                user_id=user_id,
+                title='New Chat'
+            ))
+            logger.info(f"💾 Session {session_id} created in MongoDB")
+        except Exception as db_error:
+            logger.error(f"❌ Failed to create session in MongoDB: {str(db_error)}")
+            # Continue anyway, as session will be created when first message is sent
+        
         # Add to user sessions
         if user_id not in user_sessions:
             user_sessions[user_id] = set()
@@ -1737,10 +1783,14 @@ def handle_create_new_chat(data=None):
         emit('init_response', response, room=request.sid)
         emit('new_chat_created', response, room=request.sid)
         
-        # Also trigger session list refresh
-        sessions = asyncio.run(chatbot.memory_manager.get_user_sessions(user_id))
-        sessions_converted = convert_dates_to_isoformat(sessions)
-        emit('user_sessions', {'sessions': sessions_converted}, room=request.sid)
+        # Get updated session list and broadcast it
+        try:
+            sessions = asyncio.run(chatbot.memory_manager.get_user_sessions(user_id))
+            sessions_converted = convert_dates_to_isoformat(sessions)
+            emit('user_sessions', {'sessions': sessions_converted}, room=request.sid)
+            logger.info(f"📋 Broadcasted {len(sessions_converted)} sessions to user {user_id}")
+        except Exception as sessions_error:
+            logger.error(f"❌ Failed to get/broadcast sessions: {str(sessions_error)}")
         
     except Exception as e:
         logger.error(f"❌ Create new chat error: {str(e)}")

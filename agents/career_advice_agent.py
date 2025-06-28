@@ -152,9 +152,7 @@ class CareerAdviceAgent(BaseAgent):
             # Generate personalized career advice
             advice_response = await self.llm_client.generate_response(context, self.system_message)
             
-            # Store conversation in memory for continuity
-            if self.memory_manager:
-                await self.memory_manager.store_conversation(session_id, original_query, advice_response)
+            # Storage is handled by app.py to avoid duplication
             
             return self.create_response(
                 'career_advice',

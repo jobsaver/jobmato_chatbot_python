@@ -420,4 +420,42 @@ class MongoDBManager:
     
     def __del__(self):
         """Cleanup on object destruction"""
-        self.close_connection() 
+        self.close_connection()
+
+    async def create_session(self, session_id: str, user_id: str, title: str = 'New Chat') -> bool:
+        """Create a new chat session"""
+        if not self.connected:
+            logger.warning("MongoDB not connected, attempting to reconnect...")
+            self._connect()
+            if not self.connected:
+                return False
+        
+        try:
+            now = datetime.utcnow()
+            session_doc = {
+                'sessionId': session_id,
+                'userId': user_id,
+                'title': title,
+                'createdAt': now,
+                'updatedAt': now,
+                'messages': [],
+                'metadata': {}
+            }
+            
+            # Use upsert to avoid duplicates
+            result = self.collection.update_one(
+                {'sessionId': session_id},
+                {'$setOnInsert': session_doc},
+                upsert=True
+            )
+            
+            if result.upserted_id or result.matched_count > 0:
+                logger.info(f"💾 Session created/found: {session_id}")
+                return True
+            else:
+                logger.warning(f"⚠️ Session operation unclear: {session_id}")
+                return False
+            
+        except Exception as e:
+            logger.error(f"❌ Error creating session: {str(e)}")
+            return False 

@@ -100,9 +100,7 @@ Always provide clear, organized information about the user's profile and suggest
             # Generate personalized profile response
             profile_response = await self.llm_client.generate_response(context, self.system_message)
             
-            # Store conversation in memory
-            if self.memory_manager:
-                await self.memory_manager.store_conversation(session_id, original_query, profile_response)
+            # Storage is handled by app.py to avoid duplication
             
             return self.create_response(
                 'profile_info',
