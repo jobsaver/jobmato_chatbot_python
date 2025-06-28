@@ -716,7 +716,7 @@
 
             createNewSession() {
                 console.log('🆕 Creating new session...');
-                this.socket.emit('init_chat', {});
+                    this.socket.emit('init_chat', {});
                  // After creating a new session via socket, we should probably get confirmation
                 // and then refresh the session list. A slight delay might be needed.
                 setTimeout(() => this.fetchSessions(), 1000);
@@ -1003,9 +1003,9 @@
                 
                 // Load history messages
                 if(Array.isArray(messages)) {
-                    messages.forEach(msg => {
+                messages.forEach(msg => {
                         this.addMessage(msg.content, msg.sender === 'user' ? 'user' : 'assistant', msg.full_response);
-                    });
+                });
                 }
             }
             
@@ -1052,7 +1052,7 @@
             
             formatJobResponse(content, jobs) {
                 let html = `<p>${this.formatTextContent(content)}</p>`;
-
+                
                 if (jobs && jobs.length > 0) {
                     jobs.forEach(job => {
                         const companyName = (job.company && typeof job.company === 'object') ? job.company.name : job.company;

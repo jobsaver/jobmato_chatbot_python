@@ -182,7 +182,7 @@ class JobMatoTools:
                     'connection_error': True,
                     'response_time': response_time
                 }
-        
+                
         except Exception as e:
             response_time = time.time() - start_time if 'start_time' in locals() else 0
             logger.error(f"❌ Unexpected error [{request_id}] - {str(e)}")

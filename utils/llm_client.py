@@ -21,30 +21,9 @@ class LLMClient:
         genai.configure(api_key=api_key)
         
         # Use the fastest model for better performance
-        self.model = genai.GenerativeModel('gemini-2.5-flash') 
+        self.model = genai.GenerativeModel('gemini-2.0-flash') 
         
-        # Disable safety filters
-        self.model = genai.GenerativeModel(
-            'gemini-2.5-flash',
-            safety_settings=[
-                {
-                    "category": "HARM_CATEGORY_HARASSMENT",
-                    "threshold": "BLOCK_NONE"
-                },
-                {
-                    "category": "HARM_CATEGORY_HATE_SPEECH", 
-                    "threshold": "BLOCK_NONE"
-                },
-                {
-                    "category": "HARM_CATEGORY_SEXUALLY_EXPLICIT",
-                    "threshold": "BLOCK_NONE"
-                },
-                {
-                    "category": "HARM_CATEGORY_DANGEROUS_CONTENT",
-                    "threshold": "BLOCK_NONE"
-                }
-            ]
-        )
+  
         
         # Simple in-memory cache for repeated queries
         self.cache = {}
@@ -63,16 +42,13 @@ class LLMClient:
             
             # Optimize generation config for speed
             generation_config = genai.GenerationConfig(
-                temperature=0.3,  # Lower temperature for faster, more consistent responses
+                temperature=0.2,  # Lower temperature for faster, more consistent responses
                 max_output_tokens=max_tokens,
                 top_p=0.8,
                 top_k=40
             )
             
-            # Optimize prompt length
-            if len(system_message) > 1000:
-                system_message = system_message[:1000] + "..."
-            
+          
             full_prompt = f"{system_message}\n\nUser: {prompt}\n\nAssistant:"
             
             # Generate response

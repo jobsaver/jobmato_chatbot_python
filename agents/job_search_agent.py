@@ -496,33 +496,32 @@ class JobSearchAgent(BaseAgent):
             params['salary_max'] = extracted_data['salary_max']
         
         # 🎓 Internship filter - IMPROVED LOGIC
-        # Only set internship if explicitly requested AND user doesn't have substantial skills
-        if extracted_data.get('internship') is not None:
-            # Check if user has substantial technical skills that suggest they're beyond internship level
-            has_substantial_skills = self._has_substantial_technical_skills(extracted_data, profile_data, resume_data)
-            
-            if extracted_data['internship'] and not has_substantial_skills:
-                params['internship'] = True
-                params['job_type'] = 'internship'
-                params['experience_max'] = 1  # Max 1 year for internships
-                logger.info(f"🎓 Detected internship search for entry-level user, setting job_type: internship")
-            elif extracted_data['internship'] and has_substantial_skills:
-                # User has substantial skills but requested internship - this might be for career transition
-                params['internship'] = True
-                params['job_type'] = 'internship'
-                logger.info(f"🎓 User with substantial skills requested internship (possible career transition)")
-            else:
-                # Not an internship request - focus on full-time positions
-                params['internship'] = False
-                params['job_type'] = 'full-time'
-                logger.info(f"💼 Focusing on full-time positions for user with substantial skills")
+        # Check for internship request from multiple sources
+        is_internship_request = (
+            extracted_data.get('internship') is True or 
+            extracted_data.get('job_type') == 'internship' or
+            (extracted_data.get('job_title', '').lower().find('intern') != -1)
+        )
+        
+        if is_internship_request:
+            # Always set internship=True when user explicitly requests internships
+            params['internship'] = True
+            params['job_type'] = 'internship'
+            params['experience_max'] = 1  # Max 1 year for internships
+            logger.info(f"🎓 Detected internship request - setting internship=True and job_type=internship")
+        elif extracted_data.get('internship') is False:
+            # User explicitly said no internships
+            params['internship'] = False
+            params['job_type'] = 'full-time'
+            logger.info(f"💼 User explicitly requested non-internship positions")
         else:
-            # No explicit internship request - check if we should default to full-time based on skills
+            # No explicit internship request - check if we should default based on skills
             has_substantial_skills = self._has_substantial_technical_skills(extracted_data, profile_data, resume_data)
             if has_substantial_skills:
                 params['internship'] = False
                 params['job_type'] = 'full-time'
                 logger.info(f"💼 Defaulting to full-time positions for user with substantial skills")
+            # If no substantial skills, don't set internship filter to allow both types
         
         # 📄 Pagination parameters
         if extracted_data.get('limit'):
@@ -665,6 +664,10 @@ class JobSearchAgent(BaseAgent):
             params['internship'] = True
             params['job_type'] = 'internship'
             params['experience_max'] = 1  # Max 1 year for internships
+            
+            # 🎓 Clean job title if it contains internship keywords
+            if params.get('job_title'):
+                params = self._clean_internship_job_title(params)
         
         # Auto-detect remote work preference
         if any(keyword in original_query for keyword in ['remote', 'work from home', 'wfh']):
@@ -836,12 +839,20 @@ class JobSearchAgent(BaseAgent):
                     if line.startswith('{') and line.endswith('}'):
                         parsed_params = json.loads(line)
                         logger.info(f"✅ Successfully parsed LLM parameters: {parsed_params}")
+                        
+                        # 🎓 Clean job title if internship is detected
+                        parsed_params = self._clean_internship_job_title(parsed_params)
+                        
                         return parsed_params
                
                 # If no JSON line found, try to parse the entire response
                 if llm_response.strip().startswith('{') and llm_response.strip().endswith('}'):
                     parsed_params = json.loads(llm_response.strip())
                     logger.info(f"✅ Successfully parsed LLM parameters: {parsed_params}")
+                    
+                    # 🎓 Clean job title if internship is detected
+                    parsed_params = self._clean_internship_job_title(parsed_params)
+                    
                     return parsed_params
                 
             except json.JSONDecodeError as e:
@@ -855,6 +866,58 @@ class JobSearchAgent(BaseAgent):
             logger.error(f"❌ Error in LLM query parsing: {str(e)}")
             return self._fallback_query_parsing(query)
     
+    def _clean_internship_job_title(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Clean job title to remove internship keywords when internship flag is set"""
+        if not params.get('internship') or not params.get('job_title'):
+            return params
+        
+        job_title = params['job_title']
+        internship_keywords = ['intern', 'internship', 'internships', 'trainee', 'graduate', 'student', 'summer intern', 'winter intern']
+        
+        # Clean the job title
+        cleaned_title = job_title.lower()
+        for keyword in internship_keywords:
+            cleaned_title = cleaned_title.replace(keyword, '').strip()
+        
+        # Remove extra spaces and clean up
+        cleaned_title = ' '.join(cleaned_title.split())
+        
+        # If we have a meaningful title left, use it
+        if cleaned_title and len(cleaned_title) > 2:
+            # Capitalize properly
+            if 'flutter' in cleaned_title:
+                params['job_title'] = 'Flutter Developer'
+            elif 'android' in cleaned_title:
+                params['job_title'] = 'Android Developer'
+            elif 'ios' in cleaned_title:
+                params['job_title'] = 'iOS Developer'
+            elif 'react' in cleaned_title:
+                params['job_title'] = 'React Developer'
+            elif 'python' in cleaned_title:
+                params['job_title'] = 'Python Developer'
+            elif 'java' in cleaned_title and 'javascript' not in cleaned_title:
+                params['job_title'] = 'Java Developer'
+            elif 'javascript' in cleaned_title or 'js' in cleaned_title:
+                params['job_title'] = 'JavaScript Developer'
+            elif 'node' in cleaned_title:
+                params['job_title'] = 'Node.js Developer'
+            elif 'full stack' in cleaned_title or 'fullstack' in cleaned_title:
+                params['job_title'] = 'Full Stack Developer'
+            elif 'frontend' in cleaned_title or 'front-end' in cleaned_title:
+                params['job_title'] = 'Frontend Developer'
+            elif 'backend' in cleaned_title or 'back-end' in cleaned_title:
+                params['job_title'] = 'Backend Developer'
+            elif 'data scien' in cleaned_title:
+                params['job_title'] = 'Data Scientist'
+            elif 'devops' in cleaned_title:
+                params['job_title'] = 'DevOps Engineer'
+            else:
+                # Capitalize the first letter of each word
+                params['job_title'] = ' '.join(word.capitalize() for word in cleaned_title.split())
+        
+        logger.info(f"🎓 Cleaned job title from '{job_title}' to '{params['job_title']}' for internship search")
+        return params
+    
     def _fallback_query_parsing(self, query: str) -> Dict[str, Any]:
         """Fallback method for basic query parsing if LLM fails"""
         params = {}
@@ -865,10 +928,30 @@ class JobSearchAgent(BaseAgent):
         for action_word in ['suggest', 'find', 'show me', 'search for', 'look for', 'get me', 'give me']:
             cleaned_query = cleaned_query.replace(action_word, '').strip()
         
-        # Basic job title extraction
+        # 🎓 IMPROVED INTERNSHIP DETECTION - Check for internship keywords first
+        internship_keywords = ['intern', 'internship', 'internships', 'trainee', 'graduate', 'student', 'summer intern', 'winter intern']
+        is_internship = any(keyword in cleaned_query for keyword in internship_keywords)
+        
+        if is_internship:
+            params['internship'] = True
+            params['job_type'] = 'internship'
+            params['experience_max'] = 1
+            logger.info(f"🎓 Detected internship request in fallback parsing")
+            
+            # Clean the query to remove internship keywords for job title extraction
+            for keyword in internship_keywords:
+                cleaned_query = cleaned_query.replace(keyword, '').strip()
+            
+            # Remove extra spaces and clean up
+            cleaned_query = ' '.join(cleaned_query.split())
+        
+        # Basic job title extraction (now with cleaned query)
         if 'android' in cleaned_query:
             params['job_title'] = 'Android Developer'
             params['skills'] = 'Android,Kotlin,Java'
+        elif 'flutter' in cleaned_query:
+            params['job_title'] = 'Flutter Developer'
+            params['skills'] = 'Flutter,Dart,Mobile Development'
         elif 'ios' in cleaned_query:
             params['job_title'] = 'iOS Developer'
             params['skills'] = 'iOS,Swift,Objective-C'
@@ -911,14 +994,12 @@ class JobSearchAgent(BaseAgent):
         elif 'hybrid' in cleaned_query:
             params['work_mode'] = 'hybrid'
         
-        # Job type detection
-        if 'intern' in cleaned_query:
-            params['job_type'] = 'internship'
-            params['experience_max'] = 1
-        elif 'senior' in cleaned_query:
-            params['experience_min'] = 5
-        elif 'junior' in cleaned_query:
-            params['experience_max'] = 2
+        # Experience level detection (only if not already an internship)
+        if not is_internship:
+            if 'senior' in cleaned_query:
+                params['experience_min'] = 5
+            elif 'junior' in cleaned_query:
+                params['experience_max'] = 2
         
         # Only set general query if we have meaningful terms and no specific job title
         if not params.get('job_title') and len(cleaned_query.strip()) > 2:
@@ -968,7 +1049,9 @@ class JobSearchAgent(BaseAgent):
                 if extracted_data.get('experience_max') is not None:
                     search_params['experience_max'] = extracted_data['experience_max']
                 
-                if extracted_data.get('internship'):
+                # 🎓 Check for internship from multiple sources
+                if (extracted_data.get('internship') is True or 
+                    extracted_data.get('job_type') == 'internship'):
                     search_params['internship'] = True
                     search_params['job_type'] = 'internship'
                 
@@ -1154,23 +1237,23 @@ class JobSearchAgent(BaseAgent):
         # Check if user has substantial skills before defaulting to internships
         has_substantial_skills = self._has_substantial_technical_skills(extracted_data, {}, {})
         
-        if extracted_data.get('internship') is not None:
-            if extracted_data['internship'] and not has_substantial_skills:
-                # User explicitly requested internship and has entry-level skills
-                essential_params['internship'] = True
-                essential_params['job_type'] = 'internship'
-                essential_params['experience_max'] = 1
-                logger.info(f"🔄 Broader search: User requested internship with entry-level skills")
-            elif extracted_data['internship'] and has_substantial_skills:
-                # User requested internship but has substantial skills (career transition)
-                essential_params['internship'] = True
-                essential_params['job_type'] = 'internship'
-                logger.info(f"🔄 Broader search: User with substantial skills requested internship")
-            else:
-                # Not an internship request - focus on full-time positions
-                essential_params['internship'] = False
-                essential_params['job_type'] = 'full-time'
-                logger.info(f"🔄 Broader search: Focusing on full-time positions")
+        # 🎓 Check for internship from multiple sources
+        is_internship_request = (
+            extracted_data.get('internship') is True or 
+            extracted_data.get('job_type') == 'internship'
+        )
+        
+        if is_internship_request:
+            # User explicitly requested internship
+            essential_params['internship'] = True
+            essential_params['job_type'] = 'internship'
+            essential_params['experience_max'] = 1
+            logger.info(f"🔄 Broader search: User requested internship")
+        elif extracted_data.get('internship') is False:
+            # User explicitly said no internships
+            essential_params['internship'] = False
+            essential_params['job_type'] = 'full-time'
+            logger.info(f"🔄 Broader search: User explicitly requested non-internship positions")
         else:
             # No explicit internship request - default based on skills
             if has_substantial_skills:
