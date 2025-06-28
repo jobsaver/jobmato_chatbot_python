@@ -862,11 +862,15 @@ def handle_send_message(data):
         
         while db_retry_count < max_db_retries and not conversation_stored:
             try:
+                # Include the response type in metadata for proper storage
+                storage_metadata = response.get('metadata', {}).copy()
+                storage_metadata['type'] = response.get('type', 'plain_text')
+                
                 asyncio.run(chatbot.memory_manager.store_conversation(
                     session_id=session_id,
                     user_message=message,
                     assistant_message=response.get('content', ''),
-                    metadata=response.get('metadata', {}),
+                    metadata=storage_metadata,
                     user_id=user_id
                 ))
                 logger.info(f"💾 Conversation stored for session {session_id}")
